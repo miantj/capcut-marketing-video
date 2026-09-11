@@ -1,0 +1,6 @@
+interface:
+  display_name: "AI 视频制作与剪映草稿"
+  short_description: "生成和编辑视频，按文意完成配音、字幕字体、动画、花字、气泡及剪映草稿"
+  default_prompt: "使用 $capcut-marketing-video，生成或编辑我的视频，按实际配音对齐素材和字幕，完成字体、进出场动画、花字、气泡和配乐，从 workflow.py start 开始逐步执行脚本，检查实际工程、首页注册和审阅证据后，按约定交付已安装的剪映工程与视频。"
+policy:
+  allow_implicit_invocation: true
