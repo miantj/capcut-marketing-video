@@ -4,24 +4,25 @@
 
 检查本机版本、doctor、describe 或本地文档，复用已有依赖。不盲加 --dry-run；只在具体命令支持时使用。FFmpeg/ffprobe 分析与预处理，Whisper 按需转写，剪映原生预览与导出。
 
-下列语法在本机 0.22.0 文档核对；升级后需复核。占位参数须替换。
+下列语法在本机 **0.23.x** 文档核对；升级后需复核。占位参数须替换。
 
 ```bash
-capcut compile <compile.json> --out <新草稿目录>
+capcut compile <compile.json> --out <新草稿目录> [--check | --plan]
+capcut render <草稿> --out <proxy.mp4> --burn-captions --scale 0.5
 capcut lint <草稿>
 capcut diagnose <草稿>
-capcut register <草稿目录> --materials --apply
+capcut enums --text-intros --jianying
+capcut enums --fonts --jianying
+capcut register <草稿目录> --materials --drafts <真实库>
 capcut timeline <草稿>
 capcut diff <草稿A> <草稿B>
-capcut keyframe <草稿> <片段ID> <属性> <秒> <数值>
-capcut text-anim <草稿> <片段ID> --intro <已验证slug>
-capcut save-template <草稿> <片段ID> <模板名> --out <模板.json>
-capcut apply-template <草稿> <模板.json> <开始秒> <持续秒> <新文字>
+capcut text-anim <草稿> <片段ID> --intro <已验证slug或中文名> --jianying
+capcut harvest-enums --sync --apply
 capcut restore <草稿> --list
 capcut restore <草稿> --step <步数>
 ```
 
-restore 只在确实需要恢复时执行，不沿用网上 restore --backup 示例。查看实际 JSON 返回与副作用，不能只依靠退出码。
+Windows 上 Python 子进程应调用 `capcut.cmd`（本 skill 的 `capcut_bin.py` 已处理）。`render` 仅为 FFmpeg 代理预览。`bootstrap_resources.py` 用 enums + 本机效果缓存生成 `native-resources.json`，避免手工从旧草稿抠资源。
 
 注册不是单纯校验：先确认目标草稿和真实存储目录，查看不带 --apply 的计划。按需将素材放入草稿自包含目录并重链接，再注册目标项目。compile 成功后 lint 仍可能报告 media-unregistered；这表示还没有完整注册素材，不能因此声称剪映打开已验证。测试草稿无需加入用户草稿库。本机正式交付需安装到确认的真实草稿库，执行 [draft-installation.md](draft-installation.md) 的索引核对；`register` 默认解析到项目父目录时可能只写工作目录索引，不能据其ok判断剪映首页可见。
 

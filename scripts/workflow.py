@@ -9,6 +9,7 @@ import json
 import subprocess
 from pathlib import Path
 
+from capcut_bin import capcut_cmd
 from validate_storyboard import validate, number, cue_ids, video_volume
 
 
@@ -168,14 +169,19 @@ def run(plan_path, output, build=False):
         if draft.exists():
             raise ValueError('Partial or unrecorded draft exists; inspect it and use a new output directory; never overwrite')
         try:
-            version = subprocess.run(['capcut', '--version'], capture_output=True, text=True, check=True, timeout=30)
-            state['capcut_version'] = version.stdout.strip()
-            result = subprocess.run(['capcut', 'compile', str(root / 'compile.json'), '--out', str(draft)],
-                                    capture_output=True, text=True, timeout=300)
-            write(root / 'compile-result.json', dict(argv=['capcut', 'compile', str(root / 'compile.json'), '--out', str(draft)], returncode=result.returncode, stdout=result.stdout, stderr=result.stderr))
+            binary = capcut_cmd()
+            version = subprocess.run([binary, '--version'], capture_output=True, timeout=30)
+            if version.returncode:
+                raise ValueError('capcut --version failed')
+            state['capcut_version'] = (version.stdout or b'').decode('utf-8', errors='replace').strip()
+            argv = [binary, 'compile', str(root / 'compile.json'), '--out', str(draft)]
+            result = subprocess.run(argv, capture_output=True, timeout=300)
+            stdout = (result.stdout or b'').decode('utf-8', errors='replace')
+            stderr = (result.stderr or b'').decode('utf-8', errors='replace')
+            write(root / 'compile-result.json', dict(argv=['capcut', 'compile', str(root / 'compile.json'), '--out', str(draft)], returncode=result.returncode, stdout=stdout, stderr=stderr))
             if result.returncode:
                 raise ValueError('capcut compile failed; see compile-result.json')
-            response = json.loads(result.stdout)
+            response = json.loads(stdout)
             if response.get('ok') is not True:
                 raise ValueError('capcut did not confirm compilation')
             candidate = Path(response['file_path']).resolve()
@@ -183,6 +189,12 @@ def run(plan_path, output, build=False):
                 raise ValueError('Compiler returned an unexpected draft path')
             state.update(stage='compiled', draft=str(draft), draft_file=str(candidate),
                          draft_sha256=hashlib.sha256(candidate.read_bytes()).hexdigest(), refs=response.get('refs', {}), errors=[])
+            # Cheap structural proxy; never substitutes for native preview.
+            try:
+                from delivery_steps import proxy_preview
+                state['proxy_preview'] = proxy_preview(root, draft, tag='compiled')
+            except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError) as preview_error:
+                state['proxy_preview'] = dict(ok=False, error=str(preview_error), mode='approximate')
         except (OSError, ValueError, KeyError, subprocess.SubprocessError) as exc:
             state.update(stage='failed', errors=[str(exc)])
             write(manifest, state)
@@ -197,19 +209,28 @@ def run(plan_path, output, build=False):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('command', choices=('start', 'prepare', 'build', 'finish', 'install', 'verify', 'status'))
-    parser.add_argument('path', help='start: project; prepare/build: storyboard; finish/install/verify/status: run directory')
-    parser.add_argument('--out', help='project-local build directory')
+    parser.add_argument('command', choices=('start', 'prepare', 'build', 'finish', 'install', 'verify',
+                                            'status', 'narrate', 'retime', 'bootstrap', 'preview'))
+    parser.add_argument('path', nargs='?', help='start/narrate: project or storyboard; prepare/build: storyboard; '
+                        'finish/install/verify/status/preview: run directory; bootstrap: ignored')
+    parser.add_argument('--out', help='project-local build directory / retimed storyboard / resources json')
     parser.add_argument('--request', help='actual user request; required for start')
     parser.add_argument('--mode', choices=('create', 'edit', 'export', 'script'), default='create')
     parser.add_argument('--delivery', choices=('draft', 'draft+native', 'video-only'), default='draft+native')
     parser.add_argument('--resources', help='verified native animation resources JSON for finish')
     parser.add_argument('--store', help='confirmed live draft store for install')
     parser.add_argument('--evidence', help='current native visual/audio/export evidence JSON for verify')
+    parser.add_argument('--from-dir', help='narration audio directory for retime')
+    parser.add_argument('--durations', help='JSON {script_id: seconds} for retime')
+    parser.add_argument('--audio-dir', default='narration', help='relative narration folder for narrate')
+    parser.add_argument('--in-place', action='store_true', help='overwrite storyboard on retime')
+    parser.add_argument('--names', nargs='*', help='animation names for bootstrap')
+    parser.add_argument('--from-draft', help='seed bootstrap from a saved draft')
+    parser.add_argument('--tag', default='manual', help='preview output tag')
     args = parser.parse_args()
     try:
-        if args.command in ('start', 'finish', 'install', 'verify'):
-            from delivery_steps import start, finish, install, verify
+        if args.command in ('start', 'finish', 'install', 'verify', 'preview'):
+            from delivery_steps import start, finish, install, verify, proxy_preview
             if args.command == 'start':
                 result = start(args.path, args.mode, args.delivery, args.request or '')
             elif args.command == 'finish':
@@ -220,10 +241,49 @@ def main():
                 if not args.store:
                     parser.error('--store is required for install')
                 result = install(args.path, args.store)
+            elif args.command == 'preview':
+                root = Path(args.path).resolve()
+                state = read(root / 'delivery.json')
+                draft = Path(state.get('finished_draft') or state.get('draft') or root / 'draft')
+                result = proxy_preview(root, draft, tag=args.tag)
             else:
                 result = verify(args.path, args.evidence)
         elif args.command == 'status':
             result = read(Path(args.path) / 'delivery.json')
+        elif args.command == 'narrate':
+            from timeline_ops import narrate_plan
+            source = Path(args.path).resolve()
+            plan = read(source if source.is_file() else source / 'storyboard.json')
+            project = source.parent if source.is_file() else source
+            result = narrate_plan(plan, project, args.audio_dir)
+            write(project / 'narration-checklist.json', result)
+            result = dict(result, checklist=str(project / 'narration-checklist.json'))
+        elif args.command == 'retime':
+            from timeline_ops import retime
+            from validate_storyboard import validate as validate_plan
+            source = Path(args.path).resolve()
+            plan = read(source)
+            durations = read(args.durations) if args.durations else None
+            updated = retime(plan, durations=durations, from_dir=args.from_dir,
+                             evidence=args.evidence or 'Measured cue audio; listen before build')
+            target = Path(args.out).resolve() if args.out else (source if args.in_place else None)
+            if target is None:
+                raise ValueError('retime needs --in-place or --out')
+            write(target, updated)
+            report = validate_plan(updated, source.parent)
+            result = dict(ok=report['ok'], storyboard=str(target), duration=updated['duration'],
+                          narration=updated.get('narration'), errors=report['errors'],
+                          warnings=report.get('warnings', []))
+        elif args.command == 'bootstrap':
+            from bootstrap_resources import bootstrap
+            out = Path(args.out or (Path(args.path or '.') / 'native-resources.json')).resolve()
+            bundled = bootstrap(names=args.names, from_draft=args.from_draft)
+            write(out, bundled['resources'])
+            write(out.with_suffix('.meta.json'), bundled['meta'])
+            result = dict(ok=bundled['ok'], out=str(out), count=len(bundled['resources']),
+                          unresolved=bundled['meta']['unresolved'], missing=bundled['meta']['missing'],
+                          effect_roots=bundled['meta']['effect_roots'],
+                          meta=str(out.with_suffix('.meta.json')))
         else:
             if not args.out:
                 parser.error('--out is required for prepare/build')

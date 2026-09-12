@@ -2,7 +2,7 @@
 name: capcut-marketing-video
 description: 用户要求生成视频、编辑视频或由 AI 自动剪辑视频时优先使用。按脚本步骤完成口播、配音、素材、字幕字体、动画、花字、气泡、剪映工程安装及视频验收；也处理文稿和已有草稿导出。
 metadata:
-  version: "3.1.0"
+  version: "3.2.0"
 ---
 
 # AI 视频制作与编辑
@@ -32,16 +32,17 @@ python3 <skill>/scripts/workflow.py start <project> --mode create --delivery dra
 | --- | --- | --- |
 | 1 文稿 | 读 [production.md](references/production.md) 文稿部分，保存原文、断句、停顿、重音 | `storyboard.source_text` 与 `script`；预计时间明确标记，纯文稿可在此交付 |
 | 2 素材 | `inspect_inputs.py --media-dir <素材目录>`；候选再加 `--frames-out` | 盘点/抽帧后实际审阅原声、烧录字幕和文意；脚本元数据不能替代判断 |
-| 3 配音 | **只在剪映内按最终文案生成**，每句一条原生 `textReading` 音频；禁止外部 TTS、混用旧口播或手动压缩 | `narration.mode` 必填；有口播必须 `aligned`、逐文件实测时长；音频一致性通过后才能 build |
-| 4 分镜和设计 | 按实际配音填一份 storyboard，读 [design-recipes.md](references/design-recipes.md) | 镜头、字幕、音频、字体、文意动画、关键词花字、气泡；不要分别维护另一套字幕时轴 |
-| 5 准备 | `workflow.py prepare <storyboard.json> --out <project>/builds` | 自动验证并派生 compile.json、voice-script.txt、tts.txt、待处理样式清单；保存返回的 run_dir |
-| 6 构建 | `workflow.py build <storyboard.json> --out <project>/builds` | **实际执行 capcut compile**，留下命令、返回结果、refs、草稿及哈希；只有 MP4 不算完成 |
-| 7 样式 | `workflow.py finish <run_dir> --resources <native-resources.json>` | 脚本将真实字体、原生进出场、关键词样式及原生圆角气泡写入独立 finished 工程，并读回检查；复杂样式用已核实的CLI扩展 |
-| 8 安装 | `workflow.py install <run_dir> --store <实际剪映草稿库>` | 自动复制/收集素材、备份索引、重定位、register计划/执行、回读首页索引和素材；工作目录JSON不等于已安装 |
-| 9 验收/导出 | 原生预览、配音和混音试听；按需原生导出，详见 [draft-and-export.md](references/draft-and-export.md) | 检查开头、最长句、CTA与入场/停留/出场；保存证据文件及当前工程哈希；近似输出独立标记 |
-| 10 交付检查 | `workflow.py verify <run_dir> --evidence <evidence.json>` | 返回真实检查和 `next_step`；失败就补第一项缺口，不手写 passed 盖过失败 |
+| 3 资源 | `workflow.py bootstrap --out <project>/native-resources.json` | 用本机 `capcut enums` + 效果缓存生成 finish 所需动画资源；缺缓存的名字会列入 unresolved |
+| 4 配音 | `workflow.py narrate <storyboard.json>` → 剪映逐句 `textReading` → `workflow.py retime <storyboard.json> --from-dir <project>/narration --in-place` | 每句一条原生音频落到 `narration/{script_id}.wav`；retime 写回 script/captions/shots/audio 并标 `aligned`；禁止外部 TTS 进营销成片 |
+| 5 分镜和设计 | 按实际配音填一份 storyboard，读 [design-recipes.md](references/design-recipes.md) | 镜头、字幕、音频、字体、文意动画、关键词花字、气泡；不要分别维护另一套字幕时轴 |
+| 6 准备 | `workflow.py prepare <storyboard.json> --out <project>/builds` | 自动验证并派生 compile.json、voice-script.txt、tts.txt、待处理样式清单；保存返回的 run_dir |
+| 7 构建 | `workflow.py build <storyboard.json> --out <project>/builds` | **实际执行 capcut compile**，留下命令/结果/refs/哈希；成功后尝试 `capcut render` 代理预检（approximate，不替代原生） |
+| 8 样式 | `workflow.py finish <run_dir> --resources <native-resources.json>` | 写入字体/进出场/关键词/气泡；资源缺 path 时按 resource_id 回填本机效果缓存；再做一次 proxy 预检 |
+| 9 安装 | `workflow.py install <run_dir> --store <实际剪映草稿库>` | 自动复制/收集素材、备份索引、重定位、register计划/执行、回读首页索引和素材；工作目录JSON不等于已安装 |
+| 10 验收/导出 | 原生预览、配音和混音试听；按需原生导出，详见 [draft-and-export.md](references/draft-and-export.md) | 检查开头、最长句、CTA与入场/停留/出场；保存证据文件及当前工程哈希；近似输出独立标记 |
+| 11 交付检查 | `workflow.py verify <run_dir> --evidence <evidence.json>` | 返回真实检查和 `next_step`；失败就补第一项缺口，不手写 passed 盖过失败 |
 
-运行参数、分镜扩展、证据格式及失败恢复只在 [workflow-p0.md](references/workflow-p0.md) 维护。`start` 是步骤清单；`verify` 根据当前文件重查，不是靠 AI 勾选清单。`finish` 会拒绝缺失或空的动画资源路径，样式门禁会拒绝无主画面、隐藏/出屏字幕；`install` 使用带运行标记的事务副本，注册临时失败可安全重试。
+运行参数、分镜扩展、证据格式及失败恢复只在 [workflow-p0.md](references/workflow-p0.md) 维护。`start` 是步骤清单；`verify` 根据当前文件重查，不是靠 AI 勾选清单。`finish` 会拒绝缺失或空的动画资源路径，样式门禁会拒绝无主画面、隐藏/出屏字幕；`install` 使用带运行标记的事务副本，注册临时失败可安全重试。`bootstrap`/`narrate`/`retime`/`preview` 是加速步骤，不取消原生验收义务。
 
 ### 编辑已有视频/草稿
 
@@ -87,7 +88,8 @@ S02｜({开始时间})
 
 - 新建9:16竖屏，1080×1920、30fps；源仅720p时可720×1280。已有项目保留画幅。手机观看格式不代表手机版剪映工程兼容。
 - **悠然体**：实际文件、内部family及原生字体ID必须对应；文本顶层和富文本style同时设置。字号按字形和最长行校准，不把ASS像素字号等同原生字号；保持手机安全边距，不用大片遮罩。
-- 正文入场/出场默认**各0.5秒**；按文意选择原生资源。快速口播先合并意群或补停顿，留稳定阅读，不擅自缩为0.1秒。语速倍数和成片总时长分别记录。
+- 正文入场/出场默认**各0.5秒**；动画名只认 [design-recipes.md](references/design-recipes.md) 允许名单（例外用 `animation_allowlist_reason`）。快速口播先合并意群或补停顿；语速与成片时长分开记录。
+- **BGM** 规则见 [production.md](references/production.md)：优先素材视频背景音乐、整片一条音乐床、不混多段 BGM、不把人声当配乐。
 - 默认两者均有：少量**关键词花字与气泡**；统一字体和色板，不逐句堆叠。气泡字号=对应正文−2，底图随文字适配。`finish`提供关键词着色/加粗/描边和原生圆角气泡基础实现；更复杂模板/尾巴等须实际实现后再宣称完成。
 - “快速/草稿/你决定”和替代渲染不取消样式质量。只有用户明确的简化要求可填 `style_exceptions`，不得由AI自己写理由跳过要求。
 - 原生朗读优先；替换音频完整生成、可解析并覆盖文稿后才替换旧音轨。营销视频只接受剪映按最终文案生成的原生 `textReading` 音频，禁止外部 TTS、混源或手动压缩。新配音重测时长，原声/新口播不冲突，配乐不过响。

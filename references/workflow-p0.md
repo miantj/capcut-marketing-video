@@ -4,13 +4,19 @@
 
 ```bash
 python3 <skill>/scripts/workflow.py start <project> --mode create --delivery draft+native --request '实际用户需求'
+python3 <skill>/scripts/workflow.py bootstrap --out <project>/native-resources.json
 python3 <skill>/scripts/inspect_inputs.py --media-dir <素材目录>
+python3 <skill>/scripts/workflow.py narrate <project>/storyboard.json
+# 在剪映按 checklist 逐句生成 textReading → narration/{script_id}.wav
+python3 <skill>/scripts/workflow.py retime <project>/storyboard.json --from-dir <project>/narration --in-place
 python3 <skill>/scripts/workflow.py prepare <project>/storyboard.json --out <project>/builds
 python3 <skill>/scripts/workflow.py build <project>/storyboard.json --out <project>/builds
 python3 <skill>/scripts/workflow.py finish <run_dir> --resources <project>/native-resources.json
 python3 <skill>/scripts/workflow.py install <run_dir> --store <实际剪映草稿库>
 python3 <skill>/scripts/workflow.py verify <run_dir> --evidence <project>/evidence.json
 ```
+
+`bootstrap` 从本机 `capcut enums --jianying` 与 `Cache/effect/{resource_id}/{md5}` 生成 finish 资源；缺缓存会 `ok:false` 并列出 unresolved。`narrate`/`retime` 只处理清单与时轴，不调用外部 TTS。`build`/`finish` 会尝试 `capcut render` 代理预检（`mode=approximate`），失败不阻断结构交付，但不能当作原生预览通过。可用 `workflow.py preview <run_dir>` 手动重跑代理预览。
 
 原生试听/预览和导出发生在install之后、verify之前，不存在伪装成已支持的自动export命令。纯工程任务不要求MP4；明确video-only只是不安装，内部仍用capcut构建、完成样式后生成视频。脚本失败会退出非零，输出具体错误或next_step。
 
@@ -19,8 +25,9 @@ python3 <skill>/scripts/workflow.py verify <run_dir> --evidence <project>/eviden
 基础格式见[production.md](production.md)，本版构建额外要求：
 
 - `task.json`的create模式及delivery与storyboard一致。`narration.mode`不能省略；有口播要aligned、真实音频、cue_ids和对齐证据。none仅在用户选择无口播时使用，不能为绕过配音阶段填写。
-- 每屏`visual.font={path,id}`必须存在，`animation`含intro、outro、purpose、intro_seconds、outro_seconds。默认各0.5秒，另留至少0.3秒稳定阅读，实际长文案可能需要更久。
-- 少量字幕有`keywords`，少量有`bubble`，用于基础花字与气泡。用户明确简化可在`style_exceptions.keywords_reason` / `bubble_reason` / `animation_reason`保留其原话。没有用户依据不能自行填例外。
+- 每屏`visual.font={path,id}`必须存在，`animation`含intro、outro、purpose、intro_seconds、outro_seconds。默认各0.5秒，另留至少0.3秒稳定阅读。intro/outro 须在 design-recipes 允许名单；表外仅 `style_exceptions.animation_allowlist_reason`（用户原话）可通过。改默认 0.5s 时长仍用 `animation_reason`。
+- 少量字幕有`keywords`/`bubble`。用户明确简化可在`style_exceptions.keywords_reason` / `bubble_reason` / `animation_reason`保留原话。
+- BGM 门禁见 [production.md](production.md)（单床、music only）；校验器拒绝多 `asset_id` 混叠与把 speech/ambient 当 BGM。
 
 ```json
 {

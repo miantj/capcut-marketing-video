@@ -12,6 +12,14 @@ from delivery_steps import start, finish, install, verify, requirements, check_s
 
 
 class DeliveryTests(WorkflowTests):
+    def test_display_caption_text_strips_punct(self):
+        from delivery_steps import display_caption_text, CAPTION_SIDE_MARGIN_PX
+        self.assertEqual(display_caption_text('选款最浪费时间的不是逛市场，'), '选款最浪费时间的不是逛市场')
+        self.assertEqual(display_caption_text('热门档口进店就有人在挑。'), '热门档口进店就有人在挑')
+        self.assertEqual(display_caption_text('a,b.c'), 'abc')
+        self.assertEqual(display_caption_text(''), '')
+        self.assertEqual(CAPTION_SIDE_MARGIN_PX, 20)
+
     def prepare_actual(self):
         subprocess.run(['ffmpeg', '-v', 'error', '-y', '-f', 'lavfi', '-i',
                         'color=c=blue:s=72x128:r=30', '-t', '10', '-c:v', 'libx264',

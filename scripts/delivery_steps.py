@@ -7,7 +7,21 @@ import subprocess
 import uuid
 from pathlib import Path
 
+from capcut_bin import capcut_cmd
 from check_installed_draft import check as check_installed
+from bootstrap_resources import resolve_path, effect_roots
+
+# 画面左右边距（像素）；行宽 = (canvas_w - 2 * margin) / canvas_w
+CAPTION_SIDE_MARGIN_PX = 20
+# 画面字幕隐藏这些标点；storyboard/script 仍保留供口播
+CAPTION_HIDE_CHARS = '，。,.'
+
+
+def display_caption_text(text):
+    """On-screen captions hide comma/period; storyboard/script keep them for TTS."""
+    if not isinstance(text, str):
+        return ''
+    return ''.join(ch for ch in text if ch not in CAPTION_HIDE_CHARS)
 
 
 def read(p):
@@ -27,11 +41,43 @@ def sha(p):
 
 
 def command(args, log):
-    r = subprocess.run(args, capture_output=True, text=True, timeout=300)
-    write(log, dict(argv=args, returncode=r.returncode, stdout=r.stdout, stderr=r.stderr))
+    argv = list(args)
+    if argv and argv[0] == 'capcut':
+        argv[0] = capcut_cmd()
+    r = subprocess.run(argv, capture_output=True, timeout=300)
+    stdout = (r.stdout or b'').decode('utf-8', errors='replace')
+    stderr = (r.stderr or b'').decode('utf-8', errors='replace')
+    # Keep logged argv stable for evidence checks that expect ['capcut', ...]
+    write(log, dict(argv=args, returncode=r.returncode, stdout=stdout, stderr=stderr))
     if r.returncode:
         raise ValueError('Command failed; see ' + str(log))
-    return json.loads(r.stdout)
+    return json.loads(stdout)
+
+
+def proxy_preview(run_dir, draft, tag='proxy'):
+    """FFmpeg proxy via capcut render. Approximate only — never counts as native preview."""
+    root = Path(run_dir).resolve()
+    draft = Path(draft).resolve()
+    out = root / ('proxy-' + tag + '.mp4')
+    response = command(
+        ['capcut', 'render', str(draft), '--out', str(out), '--burn-captions', '--scale', '0.5'],
+        root / ('proxy-' + tag + '-result.json'))
+    return dict(ok=True, mode='approximate', tag=tag, path=str(out),
+                response=response, note='Proxy only; native preview/export still required for delivery.')
+
+
+def fill_animation_path(resource):
+    """Ensure finish resources point at a real effect-cache directory when possible."""
+    resource = dict(resource)
+    path = resource.get('path')
+    if isinstance(path, str) and path.strip() and Path(path).is_dir():
+        resource['path'] = str(Path(path).resolve())
+        return resource
+    resolved = resolve_path(resource.get('resource_id') or '', resource.get('md5') or '', effect_roots())
+    if resolved is None:
+        raise ValueError('Missing verified native text animation resource path: ' + str(resource.get('name')))
+    resource['path'] = str(resolved)
+    return resource
 
 
 def start(project, mode, delivery, request):
@@ -42,7 +88,10 @@ def start(project, mode, delivery, request):
     if (root / 'task.json').exists():
         raise ValueError('task.json already exists; read it and resume, do not reset progress')
     steps = {
-        'create': ['分析需求和交付物', '原文/口播文稿', '盘点并审阅素材', '生成配音并实测对齐', '分镜与样式设计', 'prepare', 'build', 'finish', 'install', '原生预览/试听', '按需导出', 'verify'],
+        'create': ['分析需求和交付物', '原文/口播文稿', '盘点并审阅素材',
+                   'bootstrap native-resources', 'narrate清单与原生配音', 'retime对齐',
+                   '分镜与样式设计', 'prepare', 'build(+proxy)', 'finish(+proxy)', 'install',
+                   '原生预览/试听', '按需导出', 'verify'],
         'edit': ['确认修改范围', 'inspect_inputs --draft', 'snapshot_draft', '在独立副本用capcut修改', '检查改动与原样式', '安装/注册修改副本', '原生预览/试听', '按需导出', '核对交付'],
         'export': ['确认最新来源', 'inspect_inputs --draft', 'snapshot_draft', '原生导出', '完整解码和来源比对'],
         'script': ['保存原文与疑点', '口播断句/停顿/重音', '预计时间标注', '交付文稿'],
@@ -104,9 +153,9 @@ def finish(run_dir, resources_file):
         for k in ('intro', 'outro'):
             name = cap['animation'][k]
             resource = resources.get(name)
-            resource_path = resource.get('path') if isinstance(resource, dict) else None
-            if not isinstance(resource_path, str) or not resource_path.strip() or not Path(resource_path).is_dir():
+            if not isinstance(resource, dict):
                 raise ValueError('Missing verified native text animation resource: ' + name)
+            resources[name] = fill_animation_path(resource)
     dest = root / 'finished'
     if dest.exists():
         raise ValueError('Finished draft already exists; verify/resume it instead of replacing edits')
@@ -114,18 +163,27 @@ def finish(run_dir, resources_file):
     mats = {m['id']: m for m in d['materials']['texts']}
     segments = {s['id']: s for t in d['tracks'] for s in t['segments']}
     bubble_track = dict(id=str(uuid.uuid4()), type='text', name='气泡', segments=[], attribute=0, flag=0)
+    canvas_w = float(plan.get('canvas', {}).get('width') or (d.get('canvas_config') or {}).get('width') or 720)
+    line_max = max(0.1, (canvas_w - 2 * CAPTION_SIDE_MARGIN_PX) / canvas_w)
     for i, cap in enumerate(plan['captions']):
         seg = segments[state['refs']['caption-' + str(i)]]
         mat = mats[seg['material_id']]
         visual = cap['visual']
         font = dict(visual['font'], path=str((base / visual['font']['path']).resolve()))
+        # 强制按行宽自动换行（否则 line_max_width 不生效会横向溢出）
         mat.update(font_path=font['path'], font_resource_id=font['id'], font_size=visual['fontSize'],
                    border_color='#202526', border_width=.035, border_alpha=1, has_shadow=True,
-                   shadow_color='#000000', shadow_alpha=.65, text_alpha=1, global_alpha=1)
+                   shadow_color='#000000', shadow_alpha=.65, text_alpha=1, global_alpha=1,
+                   line_max_width=line_max, force_apply_line_max_width=True, line_feed=1)
         content = json.loads(mat['content'])
+        if not content.get('styles'):
+            raise ValueError('Caption material missing styles: caption-' + str(i))
         style = copy.deepcopy(content['styles'][0])
         style.update(font=font, size=visual['fontSize'])
-        text = content['text']
+        # 画面不展示逗号/句号；口播 script 仍保留标点供朗读
+        raw_text = content.get('text') or ''
+        text = display_caption_text(raw_text) or raw_text
+        content['text'] = text
         highlight = set()
         for key in cap.get('keywords', []):
             offset = 0
@@ -147,10 +205,17 @@ def finish(run_dir, resources_file):
                 s['fill'] = {'alpha': 1, 'content': {'solid': {'color': [1, .886, .388], 'alpha': 1}, 'render_type': 'solid'}}
                 s['bold'] = True
             content['styles'].append(s)
+        if not content['styles']:
+            s = copy.deepcopy(style)
+            s['range'] = [0, 0]
+            content['styles'].append(s)
         mat['content'] = json.dumps(content, ensure_ascii=False)
         animations = []
         for mode, key in (('in', 'intro'), ('out', 'outro')):
             a = copy.deepcopy(resources[cap['animation'][key]])
+            a.pop('path_ok', None)
+            a.pop('enum', None)
+            a.pop('md5', None)
             length = round(cap['animation'][key + '_seconds'] * 1e6)
             a.update(type=mode, duration=length, start=0 if mode == 'in' else seg['target_timerange']['duration'] - length)
             animations.append(a)
@@ -179,12 +244,17 @@ def finish(run_dir, resources_file):
     for name in ('draft_content.json', 'draft_info.json'):
         write(dest / name, d)
     state.update(finished_draft=str(dest), finished_sha256=sha(dest / 'draft_content.json'))
+    try:
+        state['proxy_preview_finished'] = proxy_preview(root, dest, tag='finished')
+    except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError, json.JSONDecodeError) as preview_error:
+        state['proxy_preview_finished'] = dict(ok=False, error=str(preview_error), mode='approximate')
     write(root / 'delivery.json', state)
     result = check_styles(dest, plan, state['refs'], base)
     write(root / 'style-check.json', result)
     if not result['ok']:
         raise ValueError('Style verification failed; see style-check.json')
-    return dict(**result, next_step='install', draft=str(dest), native_preview='pending')
+    return dict(**result, next_step='install', draft=str(dest), native_preview='pending',
+                proxy_preview=state.get('proxy_preview_finished'))
 
 
 def check_styles(draft, plan, refs, base):
@@ -237,14 +307,18 @@ def check_styles(draft, plan, refs, base):
             errors.append('Caption timing mismatch: ' + name)
         if m.get('font_size') != cap['visual']['fontSize'] or any(x.get('size') != cap['visual']['fontSize'] for x in c.get('styles', [])):
             errors.append('Font size not applied: ' + name)
-        if c.get('text') != cap['text']:
+        shown = display_caption_text(cap['text']) or cap['text']
+        if c.get('text') != shown:
             errors.append('Text mismatch: ' + name)
         if not Path(path).is_file() or m.get('font_path') != path or m.get('font_resource_id') != font.get('id') or any(
                 x.get('font', {}).get('path') != path or x.get('font', {}).get('id') != font.get('id') for x in c.get('styles', [])) or not c.get('styles'):
             errors.append('Font not applied to actual text: ' + name)
         for keyword in cap.get('keywords', []):
-            at = cap['text'].find(keyword)
-            lo = len(cap['text'][:at].encode('utf-16-le')) // 2
+            at = shown.find(keyword)
+            if at < 0:
+                errors.append('Missing keyword styling: ' + name + ' ' + keyword)
+                continue
+            lo = len(shown[:at].encode('utf-16-le')) // 2
             hi = lo + len(keyword.encode('utf-16-le')) // 2
             hot = set()
             for st in c.get('styles', []):
@@ -335,6 +409,30 @@ def install(run_dir, store):
             write(dst / filename, d)
         meta_path = dst / 'draft_meta_info.json'
         meta = read(meta_path) if meta_path.exists() else {}
+        # Keep homepage material index on the installed copy; drop leftover compile-workspace paths.
+        for group in meta.get('draft_materials', []) or []:
+            kept = []
+            for item in group.get('value', []) or []:
+                fp = item.get('file_Path')
+                if not fp:
+                    kept.append(item)
+                    continue
+                path = Path(fp)
+                try:
+                    if path.resolve().is_relative_to(dst):
+                        kept.append(item)
+                        continue
+                except (OSError, ValueError):
+                    pass
+                if path.is_file():
+                    target = dst / 'assets' / (sha(path)[:16] + path.suffix)
+                    target.parent.mkdir(exist_ok=True)
+                    if not target.exists():
+                        shutil.copy2(path, target)
+                    item = dict(item)
+                    item['file_Path'] = str(target)
+                    kept.append(item)
+            group['value'] = kept
         meta.update(draft_id=ident, draft_name=name, draft_fold_path=str(dst), draft_root_path=str(store),
                     draft_json_file=str(dst / 'draft_content.json'), tm_draft_removed=0, draft_is_invisible=False)
         write(meta_path, meta)

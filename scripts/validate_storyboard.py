@@ -9,11 +9,22 @@ import math
 from pathlib import Path
 import sys
 
+from design_allowlist import ALLOWED_TEXT_INTROS, ALLOWED_TEXT_OUTROS
+
 RECIPES = {'keyword-reveal', 'editorial-stack', 'benefit-tag', 'number-focus', 'cta-lockup'}
 
 
 def number(x):
     return isinstance(x, (int, float)) and not isinstance(x, bool) and math.isfinite(x)
+
+
+def _user_allows_extra_animation(plan):
+    """Only animation_allowlist_reason may bypass the name allowlist.
+
+    animation_reason is reserved for non-default intro/outro durations (see delivery_steps).
+    """
+    reason = (plan.get('style_exceptions') or {}).get('animation_allowlist_reason')
+    return isinstance(reason, str) and bool(reason.strip())
 
 
 def cue_ids(row):
@@ -213,6 +224,15 @@ def validate(plan, base):
         if not isinstance(animation, dict):
             error('caption.animation must be an object')
             animation = {}
+        intro_name, outro_name = animation.get('intro'), animation.get('outro')
+        if isinstance(intro_name, str) and intro_name not in ALLOWED_TEXT_INTROS and not _user_allows_extra_animation(plan):
+            error('Intro not in skill allowlist (design-recipes): ' + intro_name +
+                  '; use ' + ', '.join(sorted(ALLOWED_TEXT_INTROS)) +
+                  ' or set style_exceptions.animation_allowlist_reason with user quote')
+        if isinstance(outro_name, str) and outro_name not in ALLOWED_TEXT_OUTROS and not _user_allows_extra_animation(plan):
+            error('Outro not in skill allowlist (design-recipes): ' + outro_name +
+                  '; use ' + ', '.join(sorted(ALLOWED_TEXT_OUTROS)) +
+                  ' or set style_exceptions.animation_allowlist_reason with user quote')
         intro, outro = animation.get('intro_seconds', 0.5), animation.get('outro_seconds', 0.5)
         if not all(number(v) and v >= 0 for v in (intro, outro)):
             error('Invalid caption animation duration')
@@ -229,6 +249,7 @@ def validate(plan, base):
         error('Captions must cover every script cue exactly once in script order')
     voices = []
     voice_keys = []
+    bgm_rows = []
     for i, audio in enumerate(collections['audio']):
         if not segment(audio, 'audio ' + str(i), ('audio', 'video')):
             continue
@@ -237,6 +258,8 @@ def validate(plan, base):
             error('Audio segment uses video declared to have no audio: ' + audio['asset_id'])
         if audio.get('role') not in ('narration', 'bgm', 'sfx'):
             error('Unknown audio role')
+        if audio.get('role') == 'bgm':
+            bgm_rows.append(audio)
         if audio.get('role') == 'narration':
             voices.append(audio)
             volume = audio.get('volume', 1)
@@ -257,6 +280,36 @@ def validate(plan, base):
             if field in audio and (not number(audio[field]) or audio[field] < 0 or audio[field] > audio['end'] - audio['start']):
                 error('Invalid audio ' + field)
     no_overlap(voices, 'narration audio')
+    bgm_ids = list(dict.fromkeys(row['asset_id'] for row in bgm_rows))
+    if len(bgm_ids) > 1:
+        error('Do not mix multiple BGM sources; pick one music bed for the whole piece')
+    for aid in bgm_ids:
+        asset = assets[aid]
+        kind = asset.get('kind')
+        original = asset.get('original_audio')
+        audio_kind = asset.get('audio_kind')
+        if kind == 'video' and original != 'music':
+            error('BGM from video must be background music (original_audio=music), not speech/ambient/none: ' + str(aid))
+        if kind == 'audio' and audio_kind in ('speech', 'sfx', 'ambient'):
+            error('BGM audio asset must be music, not ' + str(audio_kind) + ': ' + str(aid))
+        if kind == 'audio' and audio_kind is None:
+            warnings.append('BGM audio asset ' + str(aid) + ' should set audio_kind=music after confirming it is background music, not speech')
+    live_music = []
+    for shot in shots:
+        asset = assets.get(shot.get('asset_id')) or {}
+        if asset.get('kind') != 'video' or asset.get('original_audio') != 'music':
+            continue
+        volume = video_volume(asset, shot)
+        if number(volume) and volume > 0:
+            live_music.append(asset['id'])
+    if len(set(live_music)) > 1:
+        error('Do not keep audible music from multiple source videos; mute extras or use one BGM bed')
+    if bgm_ids and set(live_music) - set(bgm_ids):
+        error('Separate BGM track plus other unmuted source-video music would mix beds')
+    music_sources = {a['id'] for a in assets.values()
+                     if a.get('kind') == 'video' and a.get('original_audio') == 'music'}
+    if music_sources and not bgm_ids and not live_music:
+        warnings.append('Source video(s) declare music but no BGM bed is used; prefer one material BGM over library pads')
     if mode in ('none', 'source') and voices:
         error('Separate narration audio conflicts with narration mode')
     if narration.get('timing') == 'aligned' and mode in ('provided', 'native_tts'):
