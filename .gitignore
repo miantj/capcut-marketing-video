@@ -1,4 +1,46 @@
-.cache/
-__pycache__/
-*.pyc
+# 本机工具与虚拟环境
+.audio-tools/
+.venv/
+venv/
+.env
+.env.local
+.env.*.local
+!.env.example
 
+# 运行数据、缓存、验收产物
+projects/
+素材/
+video-workbench/data/
+video-workbench/verification/
+video-workbench/.sites-runtime/
+capcut-marketing-video/.cache/
+
+# Python / Node
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+node_modules/
+npm-debug.log*
+
+# 编辑器与系统垃圾
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+*.swp
+*.swo
+.idea/
+.vscode/
+*.orig
+*~
+
+# 日志与本地数据库
+*.log
+*.sqlite3
+*.sqlite3-*
