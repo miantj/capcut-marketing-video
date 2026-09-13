@@ -10,29 +10,44 @@
 </head>
 <body>
   <header class="topbar">
-    <a href="/" class="brand" aria-label="视频工作台首页"><span class="brandmark">一</span><strong>视频工作台</strong><span class="internal">内部试用</span></a>
-    <div class="machine"><span id="machine-state">正在连接工作机</span><span class="avatar" aria-hidden="true">YS</span></div>
+    <a href="/" class="brand" aria-label="视频工作台首页"><span class="brandmark">一</span><strong>视频工作台</strong><span class="internal">创作空间</span></a>
+    <div class="machine"><span id="machine-state">正在连接工作机</span><a href="#queue-title" class="queue-link">查看任务 <span aria-hidden="true">↗</span></a></div>
   </header>
   <main>
-    <div class="page-heading"><div><p class="eyebrow">VIDEO WORKSPACE</p><h1>把素材，变成下一条视频。</h1><p class="intro">添加画面、音乐和文案，领取可继续编辑的剪映草稿。</p></div><div class="local-label">素材保存在工作机<br><span>公司局域网 · 团队共享任务</span></div></div>
+    <div class="page-heading">
+      <div><p class="eyebrow"><span></span> YISHOU CONTENT STUDIO</p><h1>好素材，<span>即刻成片。</span></h1><p class="intro">从一段灵感，到下一条值得发布的视频。</p></div>
+      <div class="workflow-note"><span class="workflow-label">你的创作，只需四步</span><div><span>素材</span><b>→</b><span>文案</span><b>→</b><span>声音</span><b>→</b><span>风格</span></div><small>自动制作 · 可编辑草稿 · 视频预览</small></div>
+    </div>
     <div id="connection-error" class="banner error" role="alert" hidden></div>
     <div class="workspace">
       <section class="composer panel" aria-labelledby="composer-title">
-        <div class="panel-heading"><div><span class="section-label">制作</span><h2 id="composer-title">新建视频</h2></div><span class="format-tag">可编辑草稿 + 近似预览</span></div>
+        <div class="panel-heading"><div><span class="section-label">CREATE / 创作</span><h2 id="composer-title">新建视频</h2></div><span class="format-tag" id="preferences-status" role="status">偏好自动保存</span></div>
         <form id="job-form">
           <div id="revision-banner" class="banner" hidden><span id="revision-label"></span><button type="button" id="exit-revision" class="text-button">取消修改</button></div>
           <div class="two-cols"><label>视频名称<input name="title" id="title" maxlength="60" placeholder="例如：秋季新品 · 针织系列" required></label><label>提交人<input name="owner" id="owner" maxlength="30" placeholder="你的姓名" autocomplete="name" required></label></div>
-          <fieldset id="media-fieldset"><legend><span class="step">01</span>添加素材</legend>
+          <fieldset id="media-fieldset"><legend><span class="step">01</span>添加素材<span class="legend-aside">画面与背景音乐</span></legend>
             <label class="dropzone" id="video-drop" tabindex="0" role="button" aria-label="选择视频素材">
               <input type="file" id="videos" accept=".mp4,.mov,.m4v,.webm" multiple class="file-input">
-              <span class="upload-icon" aria-hidden="true">＋</span><strong>拖入视频，或点击选择</strong><span>最多 20 段 · 单文件 1GB · MP4 / MOV / M4V / WEBM</span>
+              <span class="upload-icon" aria-hidden="true"><svg viewBox="0 0 32 32" fill="none"><rect x="5" y="7" width="22" height="18" rx="4"/><path d="m14 12 7 4-7 4z"/></svg></span><strong>把画面放进来</strong><span class="upload-action">拖入视频，或点击选择文件 <span aria-hidden="true">↗</span></span><span>最多 20 段 · 单文件 1GB · MP4 / MOV / M4V / WEBM</span>
             </label>
             <ol class="file-list" id="video-list"></ol>
-            <p class="hint">顺序剪辑将按以下列表使用素材，可上下调整。请优先上传没有旧字幕的画面。</p>
-            <label class="music-drop" id="music-drop" tabindex="0" role="button" aria-label="选择背景音乐"><input id="music" type="file" accept=".mp3,.wav,.m4a,.aac,.ogg,.flac" class="file-input"><span class="music-icon" aria-hidden="true">♫</span><span><strong id="music-label">添加背景音乐</strong><small id="music-meta">选择一首音乐 · MP3 / WAV / M4A 等</small></span><span class="text-button">选择文件</span></label>
+            <p class="hint">建议使用无旧字幕的画面；上传后可调整素材顺序。</p>
+            <label class="music-drop" id="music-drop" tabindex="0" role="button" aria-label="选择背景音乐"><input id="music" type="file" accept=".mp3,.wav,.m4a,.aac,.ogg,.flac" class="file-input"><span class="music-icon" aria-hidden="true">♪</span><span><strong id="music-label">添加背景音乐</strong><small id="music-meta">选择一首音乐 · MP3 / WAV / M4A 等</small></span><span class="text-button">选择文件</span></label>
           </fieldset>
-          <fieldset><legend><span class="step">02</span>视频文案</legend><label class="sr-only" for="script">视频文案</label><textarea id="script" name="script" rows="5" maxlength="3000" placeholder="粘贴最终文案，例如：&#10;秋天的第一件针织，选对版型很重要。&#10;柔软亲肤，轻松搭出日常好状态。" required></textarea><div class="textarea-footer"><span id="timing-note">保留原文 · 时长为文字估算，未对齐配音</span><span id="word-count">0 / 3000</span></div></fieldset>
-          <fieldset><legend><span class="step">03</span>选择风格</legend>
+          <fieldset><legend><span class="step">02</span>视频文案<span class="legend-aside">保留你的每一句表达</span></legend><label class="sr-only" for="script">视频文案</label><textarea id="script" name="script" rows="4" maxlength="3000" placeholder="粘贴最终文案，例如：&#10;秋天的第一件针织，选对版型很重要。&#10;柔软亲肤，轻松搭出日常好状态。" required></textarea><div class="textarea-footer"><span id="timing-note">保留原文 · 时长为文字估算，未对齐配音</span><span id="word-count">0 / 3000</span></div></fieldset>
+          <fieldset class="voice-fieldset"><legend><span class="step">03</span>声音设置<span class="legend-aside">口播与音乐，恰到好处</span></legend><div class="voice-card">
+            <div class="voice-heading"><div class="voice-title"><span class="sound-icon" aria-hidden="true"><svg viewBox="0 0 28 24" fill="none"><path d="M3 10v4m5-7v10m6-14v18m6-14v10m5-7v4"/></svg></span><div><strong>让文案，自然开口</strong><small>先听一听，再开始制作</small></div></div><label><span class="sr-only">自动口播</span><select id="narration"><option value="volcengine" id="tts-option" selected>自动生成口播音频</option><option value="none">不生成口播音频</option></select></label></div>
+            <div id="tts-settings" hidden>
+              <div class="two-cols settings"><label>音色<select id="tts-voice"><option value="zh_female_vv_uranus_bigtts">VV · 女声</option><option value="custom">其他已开通音色</option></select></label><label>语速<select id="tts-speed"><option value="0.75">0.75 倍</option><option value="1" selected>正常</option><option value="1.25">1.25 倍</option><option value="1.5">1.5 倍</option><option value="2">2 倍</option></select></label></div>
+              <label id="tts-custom-row" hidden>音色 ID<input id="tts-speaker" maxlength="120" placeholder="填写火山控制台的音色 ID"></label>
+              <p class="hint">启用后将文案发送至火山引擎生成 AI 口播，按账户规则计费。字幕和镜头按实际口播时长对齐。</p>
+              <button type="button" class="secondary" id="tts-preview">试听前 20 字</button>
+              <div id="tts-preview-result" hidden><p class="audio-label">试听已生成<span>AI 口播</span></p><audio id="tts-preview-audio" controls></audio><p><a id="tts-preview-download" class="text-button" download="口播试听.wav">下载试听音频</a></p></div>
+            </div>
+            <div class="volume-row"><label for="volume">背景音乐音量</label><input type="range" id="volume" min="0" max="100" value="15"><output id="volume-value" for="volume">15%</output></div>
+            <div class="production-note" id="production-note">原视频静音，仅保留背景音乐。</div>
+          </div></fieldset>
+          <fieldset><legend><span class="step">04</span>风格与画幅<span class="legend-aside">选择适合这次内容的表达</span></legend>
             <div class="template-grid">
               <label class="template"><input type="radio" name="template" value="new" checked><span class="template-art new"><span>NEW<br>ARRIVALS</span><em>新品上新</em></span><strong>新品上新</strong><small>少标签 · 柔进入 · 字幕偏上</small></label>
               <label class="template"><input type="radio" name="template" value="selling"><span class="template-art selling"><span>好穿<br>有理由</span><em>DETAILS MATTER</em></span><strong>卖点介绍</strong><small>关键词气泡 · 卖点强调</small></label>
@@ -40,30 +55,22 @@
             </div>
             <div class="two-cols settings"><label>画幅<select name="ratio" id="ratio"><option value="9:16">9:16 竖屏</option><option value="16:9">16:9 横屏</option></select></label><label>选片方式<select name="selection" id="selection"><option value="ordered">按素材顺序剪辑</option><option value="ai" id="ai-option" disabled>AI 匹配文案（待配置）</option></select></label></div>
             <label id="cloud-consent" class="check-label" hidden><input type="checkbox" id="allow-cloud">同意将文案和素材关键帧发送至 AI 服务进行选片。</label>
-            <div class="volume-row"><label for="volume">背景音乐音量</label><input type="range" id="volume" min="0" max="100" value="15"><output id="volume-value" for="volume">15%</output></div>
-            <label>自动口播<select id="narration"><option value="volcengine" id="tts-option" selected>自动生成口播音频</option><option value="none">不生成口播音频</option></select></label>
-            <div id="tts-settings" hidden>
-              <div class="two-cols settings"><label>音色<select id="tts-voice"><option value="zh_female_vv_uranus_bigtts">VV · 女声</option><option value="custom">其他已开通音色</option></select></label><label>语速<select id="tts-speed"><option value="0.75">0.75 倍</option><option value="1" selected>正常</option><option value="1.25">1.25 倍</option><option value="1.5">1.5 倍</option><option value="2">2 倍</option></select></label></div>
-              <label id="tts-custom-row" hidden>音色 ID<input id="tts-speaker" maxlength="120" placeholder="填写火山控制台的音色 ID"></label>
-              <p class="hint">启用后将文案发送至火山引擎生成 AI 口播，按账户规则计费。字幕和镜头按实际口播时长对齐。</p>
-              <button type="button" class="secondary" id="tts-preview">生成试听（前 20 字）</button>
-              <div id="tts-preview-result" hidden><p>口播试听</p><audio id="tts-preview-audio" controls></audio><p><a id="tts-preview-download" class="text-button" download="口播试听.wav">下载试听音频</a></p></div>
-            </div>
-            <div class="production-note" id="production-note">原视频静音，仅保留背景音乐。</div>
           </fieldset>
+          <div class="submit-row">
           <div id="form-error" class="banner error" role="alert" hidden></div>
           <div id="upload-progress" hidden><div class="progress-label"><span id="upload-stage">上传中</span><span id="upload-percent">0%</span></div><progress id="upload-bar" value="0" max="100"></progress></div>
-          <div class="submit-row"><span>生成后可预览、修改并下载</span><button id="submit" class="primary" type="submit">开始制作 <span aria-hidden="true">↗</span></button></div>
+<div class="submit-summary"><strong id="creation-summary">新品上新 · 9:16 · 自动口播</strong><span id="creation-hint">添加素材和文案，开始你的创作</span></div><button id="submit" class="primary" type="submit">开始制作 <span aria-hidden="true">↗</span></button></div>
         </form>
       </section>
       <aside class="queue panel" aria-labelledby="queue-title">
-        <div class="panel-heading"><div><span class="section-label">团队队列</span><h2 id="queue-title">制作任务 <span id="job-count">0</span></h2></div><button id="refresh" class="icon-button" aria-label="刷新任务">↻</button></div>
-        <div class="queue-intro">工作机按提交顺序制作，完成后在这里领取。</div>
+        <div class="panel-heading"><div><span class="section-label">LIBRARY / 团队作品</span><h2 id="queue-title">制作任务 <span id="job-count">0</span></h2></div><button id="refresh" class="icon-button" aria-label="刷新任务">↻</button></div>
+        <div class="queue-intro">创作进度与完成的作品，都在这里。</div>
+        <div class="queue-filters" role="group" aria-label="筛选任务"><button type="button" data-filter="all" aria-pressed="true">全部 <span id="filter-all">0</span></button><button type="button" data-filter="active" aria-pressed="false">进行中 <span id="filter-active">0</span></button><button type="button" data-filter="ready" aria-pressed="false">已完成 <span id="filter-ready">0</span></button><button type="button" data-filter="attention" aria-pressed="false">待处理 <span id="filter-attention">0</span></button></div>
         <div id="jobs" aria-live="polite"><div class="empty"><span class="empty-icon" aria-hidden="true">▷</span><h3>第一条视频，从这里开始</h3><p>提交左侧表单后，制作进度与结果<br>会显示在这里。</p></div></div>
-        <div class="queue-footer"><strong>交付里有什么？</strong><p>可编辑的镜头、字幕和背景音乐<br>完整素材包 + Windows 草稿导入脚本</p><small>近似预览用于检查内容，最终效果请在剪映确认。</small></div>
+        <div class="queue-footer"><span class="delivery-icon" aria-hidden="true">↗</span><div><strong>制作完成，还能继续创作</strong><p>下载草稿，在剪映中自由修改镜头、字幕与声音。</p><small>页面为近似预览，最终效果请在剪映确认。</small></div></div>
       </aside>
     </div>
-    <footer class="page-footer"><span>一手 · 内容制作工具</span><span>局域网试用版 0.1</span></footer>
+    <footer class="page-footer"><span>一手 · 内容制作工具</span><span>本机存储 · 团队共享</span></footer>
   </main>
   <dialog id="detail-dialog" aria-labelledby="detail-title"><div class="dialog-head"><div><span class="section-label">任务详情</span><h2 id="detail-title"></h2></div><button class="icon-button" id="close-detail" aria-label="关闭详情">×</button></div><div id="detail-content"></div></dialog>
   <dialog id="login-dialog" aria-labelledby="login-title"><form id="login-form"><h2 id="login-title">进入团队工作台</h2><p>输入管理员提供的访问码。</p><label>团队访问码<input id="access-code" type="password" autocomplete="current-password" required></label><p id="login-error" class="error-text" role="alert"></p><button class="primary" type="submit">进入工作台</button></form></dialog>

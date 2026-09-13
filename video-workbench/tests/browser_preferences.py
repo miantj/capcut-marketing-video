@@ -73,7 +73,7 @@ with sync_playwright() as p:
     assert preview[0]['text'] == text[:20]
     assert preview[0]['speaker'] == 'custom_voice_id'
     assert preview[0]['speed'] == 1.5
-    assert page.locator('#tts-preview').inner_text() == '生成试听（前 20 字）'
+    assert page.locator('#tts-preview').inner_text() == '试听前 20 字'
     # Editing while a response is pending must discard the old result.
     pending = []
     page.unroute('**/api/tts/preview')
@@ -83,7 +83,7 @@ with sync_playwright() as p:
     page.locator('#script').fill('这是修改后的试听文案。')
     pending[0].fulfill(status=200, content_type='audio/wav', body=b'old-audio')
     assert page.locator('#tts-preview-result').is_hidden()
-    assert page.locator('#tts-preview').inner_text() == '生成试听（前 20 字）'
+    assert page.locator('#tts-preview').inner_text() == '试听前 20 字'
     # Disabled speech must not submit a stale invalid custom voice ID.
     page.locator('#tts-speaker').fill('无效 音色')
     page.locator('#narration').select_option('none')

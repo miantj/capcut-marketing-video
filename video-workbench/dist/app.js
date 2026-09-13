@@ -1,6 +1,6 @@
 'use strict';
 const $ = (id) => document.getElementById(id);
-const state = {videos: [], music: null, jobs: [], revision: null, busy: false, health: null, detail: null};
+const state = {videos: [], music: null, jobs: [], revision: null, busy: false, health: null, detail: null, filter: 'all'};
 const labels = {uploading: '待上传', queued: '排队中', processing: '制作中', ready: '可下载', needs_attention: '需要处理', cancelled: '已取消'};
 const templates = {new: '新品上新', selling: '卖点介绍', promo: '活动促销'};
 const esc = (value) => String(value ?? '').replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -28,8 +28,18 @@ function body() {
     tts_speed: Number($('tts-speed').value), bgm_volume: Number($('volume').value) / 100,
     allow_cloud_analysis: $('allow-cloud').checked};
 }
+function updateCreationSummary() {
+  const template = document.querySelector('[name=template]:checked').value;
+  $('creation-summary').textContent = `${templates[template]} · ${$('ratio').value} · ${$('narration').value === 'volcengine' ? '自动口播' : '无口播'}`;
+  const missing = [];
+  if (!state.revision && !state.videos.length) missing.push('视频');
+  if (!state.revision && !state.music) missing.push('背景音乐');
+  if (!$('script').value.trim()) missing.push('文案');
+  $('creation-hint').textContent = missing.length ? `还需添加${missing.join('、')}` : '素材与文案已就绪，可开始制作';
+}
 function renderFiles() {
   $('video-list').innerHTML = state.videos.map((file, i) => `<li class="file-row"><span class="file-name">${i+1}. ${esc(file.name)}</span><span class="file-size">${size(file.size)}</span><button type="button" data-move="${i}" data-direction="-1" aria-label="上移 ${esc(file.name)}" ${i === 0 ? 'disabled' : ''}>↑</button><button type="button" data-move="${i}" data-direction="1" aria-label="下移 ${esc(file.name)}" ${i === state.videos.length - 1 ? 'disabled' : ''}>↓</button><button type="button" data-remove="${i}" aria-label="移除 ${esc(file.name)}">×</button></li>`).join('');
+  updateCreationSummary();
   $('music-label').textContent = state.music?.name || '添加背景音乐';
   $('music-meta').textContent = state.music ? size(state.music.size) : '选择一首音乐 · MP3 / WAV / M4A 等';
 }
@@ -77,7 +87,7 @@ function updateNarration() {
   $('production-note').textContent = enabled ? '自动生成口播；接口不可用时自动回退为字幕 + 背景音乐。原视频静音。' : '不生成口播，按原流程制作字幕 + 背景音乐，原视频静音。';
   $('timing-note').textContent = enabled ? '保留原文 · 字幕按实际口播时长对齐' : '保留原文 · 时长为文字估算，未对齐配音';
 }
-$('narration').addEventListener('change', updateNarration);
+$('narration').addEventListener('change', () => {updateNarration(); updateCreationSummary();});
 $('tts-voice').addEventListener('change', updateNarration);
 let speechPreviewUrl, speechPreviewController;
 function clearSpeechPreview() {
@@ -86,7 +96,7 @@ function clearSpeechPreview() {
   $('tts-preview-result').hidden = true; $('tts-preview-download').removeAttribute('href');
   if (speechPreviewUrl) { URL.revokeObjectURL(speechPreviewUrl); speechPreviewUrl = null; }
   $('tts-preview').disabled = state.busy;
-  $('tts-preview').textContent = '生成试听（前 20 字）';
+  $('tts-preview').textContent = '试听前 20 字';
 }
 for (const id of ['script','narration','tts-voice','tts-speaker','tts-speed']) $(id).addEventListener('input', clearSpeechPreview);
 $('tts-preview').addEventListener('click', async () => {
@@ -112,7 +122,7 @@ $('tts-preview').addEventListener('click', async () => {
   } catch (error) { if (controller === speechPreviewController) formError(error.message); }
   finally {
     if (controller === speechPreviewController) {
-      speechPreviewController = null; button.disabled = state.busy; button.textContent = '生成试听（前 20 字）';
+      speechPreviewController = null; button.disabled = state.busy; button.textContent = '试听前 20 字';
     }
   }
 });
@@ -132,11 +142,20 @@ async function refresh() {
 }
 function renderJobs() {
   $('jobs').dataset.loaded = '1'; $('job-count').textContent = state.jobs.length;
-  if (!state.jobs.length) { $('jobs').innerHTML = '<p class="job-stage">暂无制作任务</p>'; return; }
-  $('jobs').innerHTML = state.jobs.map(job => `<article class="job-card">
+  const filters = {all: () => true, active: j => ['uploading','queued','processing'].includes(j.status), ready: j => j.status === 'ready', attention: j => j.status === 'needs_attention'};
+  for (const [key, matches] of Object.entries(filters)) $(`filter-${key}`).textContent = state.jobs.filter(matches).length;
+  document.querySelectorAll('[data-filter]').forEach(el => el.setAttribute('aria-pressed', String(el.dataset.filter === state.filter)));
+  const jobs = state.jobs.filter(filters[state.filter]);
+  if (!jobs.length) {
+    const empty = state.jobs.length ? '这里暂时没有任务' : '第一条作品，从这里开始';
+    $('jobs').innerHTML = `<div class="empty"><span class="empty-icon" aria-hidden="true">▱</span><h3>${empty}</h3><p>${state.jobs.length ? '切换筛选，查看其他作品。' : '添加素材与文案，完成后在这里领取。'}</p></div>`;
+    return;
+  }
+  $('jobs').innerHTML = jobs.map(job => `<article class="job-card">
     <div class="job-top"><h3>${esc(job.request.title)}</h3><span class="badge ${esc(job.status)}">${labels[job.status] || esc(job.status)}</span></div>
     <div class="job-meta">${esc(job.request.owner)} · ${date(job.created)} · v${job.revision}${job.parent ? ' · 修改版' : ''}</div>
     ${job.status === 'ready' ? `<img class="job-cover" src="${artifact(job,'cover.jpg')}" alt="${esc(job.request.title)}预览封面"><div class="job-summary"><strong>${Number(job.result.duration).toFixed(1)} 秒 · ${esc(job.request.ratio)}</strong>${esc(templates[job.request.template])} · ${job.result.shot_count} 个镜头<br>草稿包 ${size(job.result.package_bytes)}</div>` : `<div class="job-stage">${esc(job.error || (job.queue_position ? `前方还有 ${job.queue_position - 1} 个排队任务` : job.stage))}</div>${job.status === 'processing' ? `<progress max="100" value="${Number(job.progress)}" aria-label="制作进度 ${Number(job.progress)}%"></progress>` : ''}`}
+    ${job.status === 'ready' ? `<span class="narration-tag">${job.result.narration?.fallback ? '口播不可用 · 已按原流程制作' : job.result.narration?.provider === 'volcengine' ? '含 AI 口播' : '字幕 + 背景音乐'}</span>` : ''}
     <div class="job-actions">${job.status === 'ready' ? `<button class="primary" data-detail="${job.id}">查看预览</button><a class="secondary" href="${artifact(job,'draft.zip')}" download>下载草稿</a>` : `<button class="secondary" data-detail="${job.id}">查看详情</button>`}
     ${['ready','needs_attention','cancelled'].includes(job.status) ? `<button class="text-button" data-revise="${job.id}">${job.status === 'ready' ? '修改一版' : '修改后重试'}</button>` : ''}
     ${['uploading','queued'].includes(job.status) ? `<button class="text-button" data-cancel="${job.id}">取消任务</button>` : ''}
@@ -174,9 +193,10 @@ function revise(id) {
   $('revision-label').textContent = `沿用 v${job.revision} 的素材，原版本保留。`;
   $('composer-title').textContent = '修改视频'; $('submit').textContent = '生成新版本 ↗';
   $('detail-dialog').close(); $('job-form').scrollIntoView({behavior: 'smooth'});
+  updateCreationSummary();
   formError('');
 }
-function exitRevision() {state.revision = null; $('media-fieldset').hidden = false; $('revision-banner').hidden = true; $('composer-title').textContent = '新建视频'; $('submit').textContent = '开始制作 ↗';}
+function exitRevision() {state.revision = null; $('media-fieldset').hidden = false; $('revision-banner').hidden = true; $('composer-title').textContent = '新建视频'; $('submit').textContent = '开始制作 ↗'; updateCreationSummary();}
 $('exit-revision').addEventListener('click', exitRevision);
 $('close-detail').addEventListener('click', () => $('detail-dialog').close());
 $('detail-dialog').addEventListener('close', () => { $('detail-content').querySelectorAll('video,audio').forEach(el => el.pause()); state.detail = null; });
@@ -245,6 +265,7 @@ $('job-form').addEventListener('submit', async e => {
     toast('任务已提交，制作完成后可在右侧领取。');
     exitRevision(); state.videos = []; state.music = null; renderFiles();
     $('script').value = ''; $('title').value = ''; $('word-count').textContent = '0 / 3000';
+    updateCreationSummary();
     await refresh();
   } catch (error) {
     if (created) await api(`/api/jobs/${created.id}/cancel`, {method:'POST'}).catch(() => {});
@@ -254,7 +275,12 @@ $('job-form').addEventListener('submit', async e => {
     $('submit').textContent = state.revision ? '生成新版本 ↗' : '开始制作 ↗'; $('upload-progress').hidden = true;
   }
 });
-$('refresh').addEventListener('click', refresh);
+$('refresh').addEventListener('click', async () => {
+  $('refresh').disabled = true; await refresh(); $('refresh').disabled = false;
+});
+document.querySelectorAll('[data-filter]').forEach(el => el.addEventListener('click', () => {
+  state.filter = el.dataset.filter; renderJobs(); $('jobs').scrollTop = 0;
+}));
 $('login-dialog').addEventListener('cancel', e => e.preventDefault());
 $('login-form').addEventListener('submit', async e => {
   e.preventDefault();
@@ -268,13 +294,14 @@ async function init() {
     state.health = await api('/api/health');
     $('machine-state').textContent = state.health.ready ? '工作机已连接' : '工作机需要配置';
     $('submit').disabled = !state.health.ready;
+    $('machine-state').dataset.ready = String(state.health.ready);
     $('ai-option').disabled = !state.health.ai_ready;
     $('tts-option').textContent = state.health.tts_ready ? '自动生成口播音频' : '自动生成口播音频（服务不可用时回退）';
     updateNarration();
     $('ai-option').textContent = state.health.ai_ready ? 'AI 查看画面并匹配文案' : 'AI 匹配文案（待配置）';
     if (!state.health.ready) formError('工作机缺少视频处理工具，请联系管理员。');
     await refresh();
-  } catch (error) {$('machine-state').textContent = '暂未连接'; formError(error.message);}
+  } catch (error) {$('machine-state').textContent = '暂未连接'; $('machine-state').dataset.ready = 'false'; formError(error.message);}
 }
 const preferenceKey = 'video-workbench-preferences-v1';
 function setSpeechSpeed(value) {
@@ -291,7 +318,8 @@ function savePreferences() {
       template: document.querySelector('[name=template]:checked').value,
       volume: Number($('volume').value)
     }));
-  } catch {}
+    $('preferences-status').textContent = '偏好已保存'; $('preferences-status').dataset.saved = 'true';
+  } catch { $('preferences-status').textContent = '本次偏好未保存'; $('preferences-status').dataset.saved = 'false'; }
 }
 function restorePreferences() {
   try {
@@ -316,7 +344,9 @@ function restorePreferences() {
 }
 const preferenceInputs = new Set(['owner','narration','volume','tts-voice','tts-speaker','tts-speed','ratio','selection','template']);
 $('job-form').addEventListener('input', e => {if (preferenceInputs.has(e.target.id || e.target.name)) savePreferences();});
+$('job-form').addEventListener('input', updateCreationSummary);
 restorePreferences();
+updateCreationSummary();
 init();
 setInterval(() => {if (!document.hidden && !$('login-dialog').open) refresh();}, 4000);
 
