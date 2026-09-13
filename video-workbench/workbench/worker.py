@@ -72,8 +72,13 @@ class Worker:
         resources, font = native_resources(folder)
         store.update(job_id, 'processing', '文案分句与镜头规划', 20)
         cues = script_cues(request['script'], limit_estimate=request.get('narration') != 'volcengine')
-        cues, narration, fallback = optional_narration(settings, request, cues, folder,
-            lambda i, total: store.update(job_id, 'processing', f'生成火山口播 {i+1}/{total}', 21 + int(6*i/total)))
+        speech_cues = script_cues(request['script'], limit_estimate=False, merge_short=False)
+        aligned, narration, fallback = optional_narration(settings, request, speech_cues, folder,
+            lambda i, total: store.update(job_id, 'processing', f'检查复用并生成口播 {i+1}/{total}', 21 + int(6*i/total)))
+        if narration:
+            cues = aligned
+            speech_stats = json.loads((folder / 'narration-stats.json').read_text('utf-8'))
+            store.update(job_id, 'processing', f'口播就绪：复用 {speech_stats["reused"]} 段，新生成 {speech_stats["generated"]} 段', 27)
         if fallback:
             store.update(job_id, 'processing', fallback, 27)
         duration = round(sum(c['duration'] for c in cues), 6)
@@ -165,7 +170,7 @@ class Worker:
                   'package_bytes': (folder / 'draft.zip').stat().st_size, 'shot_count': len(shots), 'caption_count': len(cues)}
         if narration:
             result['files'].append('narration.wav')
-            result['narration'] = {'provider': 'volcengine', 'speaker': request['tts_speaker'], 'speed': request['tts_speed']}
+            result['narration'] = {'provider': 'volcengine', 'speaker': request['tts_speaker'], 'speed': request['tts_speed'], **speech_stats}
         else:
             result['narration'] = {'provider': 'none', 'fallback': bool(fallback)}
         store.update(job_id, 'ready', '草稿与近似预览可下载', 100, result=result)

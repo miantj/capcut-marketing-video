@@ -20,6 +20,7 @@ from .tts import synthesize
 from .media import ProductionError
 from .store import Store
 from .worker import Worker
+from .speech_cache import inherit_speech_cache
 
 VIDEO_EXT = {'.mp4', '.mov', '.m4v', '.webm'}
 AUDIO_EXT = {'.mp3', '.wav', '.m4a', '.aac', '.ogg', '.flac'}
@@ -280,6 +281,9 @@ def create_app(settings=None, start_worker=True):
                     with store.db() as db:
                         db.execute('INSERT INTO files(id,job,name,role,size,received,path) VALUES(?,?,?,?,?,?,?)',
                                    (file_id, new['id'], item['name'], item['role'], item['size'], item['size'], relative))
+                inherit_speech_cache(old, settings.data / 'jobs' / job_id,
+                                     settings.data / 'jobs' / new['id'],
+                                     body.request.model_dump(), settings.tts_resource)
                 store.update(new['id'], 'queued', '新版本排队中', 0)
             except Exception:
                 store.update(new['id'], 'needs_attention', '复制原素材失败', 0, error='请重新上传素材。')

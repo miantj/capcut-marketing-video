@@ -170,6 +170,10 @@ async function showDetail(id) {
       <h3>视频文案</h3><div class="detail-script">${esc(job.request.script)}</div><h3>制作记录</h3><ol class="event-list">${job.events.map(event => `<li>${date(event.at)} · ${esc(event.message)}</li>`).join('') || '<li>等待上传素材</li>'}</ol>`;
     if (!$('detail-dialog').open) $('detail-dialog').showModal();
     if (job.status === 'ready' && job.result.files.includes('narration.wav')) {
+      const speech = job.result.narration;
+      if (Number.isInteger(speech?.reused) && Number.isInteger(speech?.generated)) {
+        $('detail-content').insertAdjacentHTML('beforeend', `<p>口播：复用 ${speech.reused} 段 · 新生成 ${speech.generated} 段</p>`);
+      }
       $('detail-content').insertAdjacentHTML('beforeend', `<h3>AI 口播音频</h3><audio controls preload="metadata" src="${artifact(job,'narration.wav')}"></audio><p><a class="secondary" href="${artifact(job,'narration.wav')}" download>下载口播音频</a></p>`);
     }
   } catch (error) { toast(error.message); }
@@ -190,7 +194,7 @@ function revise(id) {
   $('allow-cloud').checked = false; $('cloud-consent').hidden = r.selection !== 'ai';
   $('word-count').textContent = `${r.script.length} / 3000`;
   $('media-fieldset').hidden = true; $('revision-banner').hidden = false;
-  $('revision-label').textContent = `沿用 v${job.revision} 的素材，原版本保留。`;
+  $('revision-label').textContent = `沿用 v${job.revision} 的素材与未改动的配音，原版本保留。`;
   $('composer-title').textContent = '修改视频'; $('submit').textContent = '生成新版本 ↗';
   $('detail-dialog').close(); $('job-form').scrollIntoView({behavior: 'smooth'});
   updateCreationSummary();

@@ -37,11 +37,18 @@ class SpeechTests(unittest.TestCase):
     def test_partial_failure_discards_audio_and_keeps_estimated_timing(self):
         with tempfile.TemporaryDirectory() as directory:
             folder = Path(directory)
-            cues = [{'id':f'S{i}', 'text':'测试文案', 'start':i*3, 'duration':3} for i in range(2)]
+            cues = [{'id':f'S{i}', 'text':f'测试文案{i}', 'start':i*3, 'duration':3} for i in range(2)]
             request = JobRequest(title='T', owner='T', script='测试文案').model_dump()
             (folder/'narration').mkdir()
             (folder/'narration/S0.wav').write_bytes(b'partial audio')
-            with patch('workbench.tts.synthesize', side_effect=[1.5, SpeechServiceError('接口断流')]):
+            def partial(settings, text, speaker, speed, destination):
+                if text.endswith('1'):
+                    raise SpeechServiceError('接口断流')
+                with wave.open(str(destination), 'wb') as output:
+                    output.setparams((1, 2, 24000, 0, 'NONE', 'not compressed'))
+                    output.writeframes(b'\0\0' * 36000)
+                return 1.5
+            with patch('workbench.tts.synthesize', side_effect=partial):
                 actual, items, warning = optional_narration(None, request, cues, folder, lambda *_: None)
             self.assertEqual(actual, cues)
             self.assertEqual([c['duration'] for c in actual], [3,3])

@@ -2,6 +2,7 @@
 import base64
 import http.client
 import json
+import shutil
 import subprocess
 import time
 import urllib.error
@@ -10,6 +11,7 @@ import uuid
 import wave
 
 from .media import ProductionError, run
+from .speech_cache import SpeechCache, DEFAULT_RESOURCE
 
 ENDPOINT = 'https://openspeech.bytedance.com/api/v3/tts/unidirectional/sse'
 
@@ -103,15 +105,37 @@ def synthesize(settings, text, speaker, speed, destination):
 def narrate(settings, request, cues, folder, progress):
     directory = folder / 'narration'
     directory.mkdir(exist_ok=True)
+    cache = SpeechCache(folder, request, getattr(settings, 'tts_resource', DEFAULT_RESOURCE))
     items, aligned, cursor = [], [], 0.
-    for index, cue in enumerate(cues):
+    generated, reused, index = 0, 0, 0
+    while index < len(cues):
+        cue = dict(cues[index])
         progress(index, len(cues))
+        # Legacy audio may combine several short clauses. Reuse an exact span
+        # without splitting audio or matching by position.
+        hit, end = None, index + 1
+        text = ''
+        for next_index in range(index, len(cues)):
+            text += cues[next_index]['text']
+            if len(text) > 150:
+                break
+            candidate = cache.get(text)
+            if candidate:
+                hit, end, cue['text'] = candidate, next_index + 1, text
         path = directory / f'{cue["id"]}.wav'
-        duration = synthesize(settings, cue['text'], request['tts_speaker'], request['tts_speed'], path)
+        if hit:
+            shutil.copyfile(hit[0], path)
+            duration = hit[1]
+            reused += 1
+        else:
+            duration = synthesize(settings, cue['text'], request['tts_speaker'], request['tts_speed'], path)
+            cache.put(cue['text'], path)
+            generated += 1
         items.append({'ref': f'narration-{index}', 'path': str(path), 'start': cursor,
                       'duration': duration, 'sourceStart': 0, 'volume': 1.0})
         aligned.append({**cue, 'start': cursor, 'duration': duration})
         cursor += duration
+        index = end
         if cursor > 180:
             raise ProductionError('实际口播超过 3 分钟，请缩短文案或提高语速后重试。')
     # Merge short caption screens without stretching speech or inserting silence.
@@ -132,4 +156,6 @@ def narrate(settings, request, cues, folder, progress):
         for item in items:
             with wave.open(item['path'], 'rb') as source:
                 output.writeframes(source.readframes(source.getnframes()))
+    (folder / 'narration-stats.json').write_text(json.dumps({'reused': reused, 'generated': generated,
+        'segments': len(items), 'resource': cache.profile['resource']}), 'utf-8')
     return captions, items

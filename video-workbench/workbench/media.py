@@ -81,7 +81,7 @@ def probe(ffmpeg, path):
     return {'duration': duration, 'width': width, 'height': height, 'video': bool(video), 'audio': audio}
 
 
-def script_cues(text, *, limit_estimate=True):
+def script_cues(text, *, limit_estimate=True, merge_short=True):
     from .skill_timing import estimate
     # Keep every non-whitespace character; split at punctuation before using a length cap.
     pieces = re.findall(r'[^，。！？；\n]+[，。！？；]?|[，。！？；]', text)
@@ -98,6 +98,10 @@ def script_cues(text, *, limit_estimate=True):
     if re.sub(r'\s', '', ''.join(lines)) != re.sub(r'\s', '', text):
         raise ProductionError('文案分句校验未通过，请检查特殊字符。')
     cues = estimate(lines)
+    if not merge_short:
+        if limit_estimate and sum(c['duration'] for c in cues) > 180:
+            raise ProductionError('第一版支持 3 分钟以内的视频，请缩短文案后重试。')
+        return cues
     # Merge short screens without adding time or changing the original words.
     # This avoids padding every short clause just to make an animation fit.
     merged, pending = [], ''
