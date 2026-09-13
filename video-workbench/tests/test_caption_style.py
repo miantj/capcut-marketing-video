@@ -69,6 +69,34 @@ class CaptionStyleTests(unittest.TestCase):
         with self.assertRaises(ProductionError):
             youran_font_id({'其他字体': {'id': 'x'}})
 
+    def test_builtin_font_requires_matching_file_and_unambiguous_table(self):
+        from workbench.caption_style import builtin_font_metadata
+        from workbench.media import ProductionError
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            font = root / '悠然体.ttf'
+            font.write_bytes(b'verified-font-bytes')
+            app = root / 'Apps/11.4.2'
+            installed = app / 'Resources/Font' / font.name
+            installed.parent.mkdir(parents=True)
+            installed.write_bytes(font.read_bytes())
+            library = app / 'VECreator.dll'
+            entry = font.name.encode() + b'\0\0' + b'1234567890123456789\0'
+            library.write_bytes(b'prefix\0' + entry)
+            metadata = builtin_font_metadata(font, root/'Apps')
+            self.assertEqual(metadata['id'], '1234567890123456789')
+            self.assertEqual(metadata['source'], 'installed_builtin_font_table')
+            installed.write_bytes(b'different-font')
+            with self.assertRaises(ProductionError):
+                builtin_font_metadata(font, root/'Apps')
+            installed.write_bytes(font.read_bytes())
+            library.write_bytes(entry + entry.replace(b'1234567890123456789', b'2234567890123456789'))
+            with self.assertRaises(ProductionError):
+                builtin_font_metadata(font, root/'Apps')
+            library.write_bytes(b'other.ttf\0' + b'1234567890123456789\0')
+            with self.assertRaises(ProductionError):
+                builtin_font_metadata(font, root/'Apps')
+
     def test_embedded_rich_font_paths_are_portable(self):
         font = Path(os.environ['LOCALAPPDATA'])/'JianyingPro/User Data/Resources/Font/悠然体.ttf'
         raw = {'font_path':str(font),'content':json.dumps({'text':'文案','styles':[{'font':{'path':str(font)}}]})}

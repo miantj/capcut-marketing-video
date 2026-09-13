@@ -21,6 +21,13 @@ from workbench.store import Store
 
 
 class PlanningTests(unittest.TestCase):
+    def test_tts_can_defer_estimated_limit_until_actual_audio(self):
+        text = '测试文案。' * 180
+        with self.assertRaises(ProductionError):
+            script_cues(text)
+        cues = script_cues(text, limit_estimate=False)
+        self.assertEqual(''.join(c['text'] for c in cues), text)
+        self.assertGreater(sum(c['duration'] for c in cues), 180)
     def test_preserves_copy_and_timings(self):
         text = '秋季新品，价格99.9元！优惠截止9月30日。\n尺码 XS / S / M，咨询客服。'
         cues = script_cues(text)
@@ -198,6 +205,27 @@ class ApiTests(unittest.TestCase):
         self.assertTrue(all(f['path'].startswith('uploads/') and '..' not in f['path'] for f in files))
         self.assertNotIn('path', self.call(base)[1]['files'][0])
 
+    def test_speech_preview_enforces_limit_and_cleans_files(self):
+        original = self.settings.tts_key, self.settings.ffmpeg
+        self.settings.tts_key, self.settings.ffmpeg = 'test-key', 'test-ffmpeg'
+        try:
+            self.assertEqual(self.call('/api/tts/preview', 'POST', {'text':'字'*21})[0], 422)
+            self.assertEqual(self.call('/api/tts/preview', 'POST', {'text':'   '})[0], 422)
+            def generated(settings, text, speaker, speed, path):
+                path.write_bytes(b'wave-test-output')
+            with patch('workbench.app.synthesize', side_effect=generated):
+                code, audio = self.call('/api/tts/preview', 'POST', {'text':'测试'})
+            self.assertEqual((code, audio), (200, b'wave-test-output'))
+            self.assertEqual(list((self.settings.data/'tts-preview').iterdir()), [])
+            def failed(settings, text, speaker, speed, path):
+                path.write_bytes(b'partial')
+                raise ProductionError('试听失败')
+            with patch('workbench.app.synthesize', side_effect=failed):
+                self.assertEqual(self.call('/api/tts/preview', 'POST', {'text':'测试'})[0], 502)
+            self.assertEqual(list((self.settings.data/'tts-preview').iterdir()), [])
+        finally:
+            self.settings.tts_key, self.settings.ffmpeg = original
+
     def test_limits_and_cloud_gate(self):
         job = self.new_job()
         base = '/api/jobs/' + job['id']
@@ -205,6 +233,16 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(self.call(base + '/files','POST',{'name':'huge.mp4','role':'video','size':2 * 1024**3})[0],413)
         self.assertEqual(self.call('/api/jobs','POST',{'title':'T','owner':'T','script':'T','selection':'ai'})[0],409)
         self.assertEqual(self.call('/api/jobs','POST',{'title':'T','owner':'T','script':'T','narration':'native_tts'})[0],422)
+        self.assertEqual(self.call('/api/jobs','POST',{'title':'T','owner':'T','script':'T','narration':'volcengine'})[0],201)
+        self.settings.tts_key = 'secret-test-value'
+        try:
+            self.assertTrue(self.call('/api/health')[1]['tts_ready'])
+            code, voiced = self.call('/api/jobs','POST',{'title':'T','owner':'T','script':'T','narration':'volcengine'})
+            self.assertEqual(code, 201)
+            self.assertNotIn('secret-test-value', json.dumps(voiced))
+            self.assertNotIn('secret-test-value', json.dumps(self.call('/api/health')[1]))
+        finally:
+            self.settings.tts_key = ''
         self.assertEqual(self.call(base + '/artifacts/commands.jsonl')[0],404)
         self.assertEqual(self.call('/api/jobs','POST',{'title':'T','owner':'T','script':'T'},headers={'Origin':'https://evil.example','Content-Type':'application/json'})[0],403)
 

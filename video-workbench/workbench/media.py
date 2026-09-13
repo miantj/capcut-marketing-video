@@ -81,7 +81,7 @@ def probe(ffmpeg, path):
     return {'duration': duration, 'width': width, 'height': height, 'video': bool(video), 'audio': audio}
 
 
-def script_cues(text):
+def script_cues(text, *, limit_estimate=True):
     from .skill_timing import estimate
     # Keep every non-whitespace character; split at punctuation before using a length cap.
     pieces = re.findall(r'[^，。！？；\n]+[，。！？；]?|[，。！？；]', text)
@@ -114,7 +114,7 @@ def script_cues(text):
         else:
             merged.append(pending)
     cues = estimate(merged)
-    if sum(c['duration'] for c in cues) > 180:
+    if limit_estimate and sum(c['duration'] for c in cues) > 180:
         raise ProductionError('第一版支持 3 分钟以内的视频，请缩短文案后重试。')
     return cues
 

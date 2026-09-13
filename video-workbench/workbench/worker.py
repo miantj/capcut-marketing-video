@@ -9,6 +9,7 @@ from .packaging import package_draft
 from .skill_timing import evidence as timing_evidence
 from .skill_timing import skill_module
 from .caption_style import native_resources, caption_plan, compile_and_finish
+from .tts import optional_narration
 
 
 class Worker:
@@ -67,10 +68,22 @@ class Worker:
         if not videos or not music:
             raise ProductionError('需要至少一段视频和一首背景音乐。')
         (folder / 'asset-index.json').write_text(json.dumps(videos + [music], ensure_ascii=False, indent=2), 'utf-8')
+        # Check local dependencies before spending on cloud narration.
+        resources, font = native_resources(folder)
         store.update(job_id, 'processing', '文案分句与镜头规划', 20)
-        cues = script_cues(request['script'])
+        cues = script_cues(request['script'], limit_estimate=request.get('narration') != 'volcengine')
+        cues, narration, fallback = optional_narration(settings, request, cues, folder,
+            lambda i, total: store.update(job_id, 'processing', f'生成火山口播 {i+1}/{total}', 21 + int(6*i/total)))
+        if fallback:
+            store.update(job_id, 'processing', fallback, 27)
         duration = round(sum(c['duration'] for c in cues), 6)
+        if duration > 180:
+            raise ProductionError('视频超过 3 分钟，请缩短文案后重试。' + (fallback or ''))
         warnings = ['纯文字与背景音乐版本，未生成配音。', '近似预览不代表剪映原生效果，草稿需在目标电脑打开确认。']
+        if narration:
+            warnings[0] = '口播由火山引擎 AI 生成，字幕按逐段音频实际时长对齐。'
+        elif fallback:
+            warnings[0] = fallback
         if request['selection'] == 'ai':
             store.update(job_id, 'processing', 'AI 查看关键帧并匹配文案', 28)
             inspection = folder / 'inspection'
@@ -81,21 +94,22 @@ class Worker:
         else:
             shots = ordered_shots(cues, videos)
             warnings.append('按素材顺序剪辑，未判断画面含义或处理原画面中的旧字幕；请在预览中检查。')
-            if request['notes']:
-                warnings.append('修改备注已保存。顺序剪辑不会理解自由文字指令；请通过文案、模板、音量等设置修改效果。')
         validate_shots(shots, videos, duration)
         if duration > sum(v['media']['duration'] for v in videos):
             warnings.append('文案时长超过视频素材总长，部分素材重复使用。')
         timing = timing_evidence(request['script'])
+        if narration:
+            timing = {'timing': 'aligned', 'source': 'volcengine', 'speech_aligned': True,
+                      'method': 'decoded_pcm_samples', 'alignment': 'segment', 'speed': request['tts_speed']}
         plan = {'mode': request['selection'], 'source_text': request['script'], 'cues': cues,
                 'shots': shots, 'duration': duration, 'timing_basis': timing, 'warnings': warnings}
+        plan['narration'] = [{k: v for k, v in item.items() if k != 'path'} for item in narration]
         (folder / 'plan.json').write_text(json.dumps(plan, ensure_ascii=False, indent=2), 'utf-8')
         width, height = (1080, 1920) if request['ratio'] == '9:16' else (1920, 1080)
         lookup = {v['id']: v for v in videos}
         video_items = [{'ref': f'v{i}', 'path': lookup[s['asset_id']]['path'], 'start': s['start'], 'duration': s['duration'],
                         'sourceStart': s['source_in'], 'volume': 0, 'width': lookup[s['asset_id']]['media']['width'],
                         'height': lookup[s['asset_id']]['media']['height']} for i, s in enumerate(shots)]
-        resources, font = native_resources(folder)
         captions = caption_plan(cues, font, width, height, request['template'])
         caption_items = []
         for i, cap in enumerate(captions):
@@ -114,10 +128,12 @@ class Worker:
                 'tracks': [{'type': 'video', 'name': '主画面', 'items': video_items},
                            {'type': 'audio', 'name': '背景音乐', 'items': audio},
                            {'type': 'text', 'name': '文案字幕', 'items': caption_items}], 'operations': operations}
+        if narration:
+            spec['tracks'].append({'type': 'audio', 'name': '火山口播', 'items': narration})
         store.update(job_id, 'processing', '生成可编辑剪映草稿', 45)
         style_plan = {'source_text':request['script'], 'duration':duration,
                       'canvas':{'width':width,'height':height,'fps':30}, 'captions':captions,
-                      'narration':{'mode':'none','timing':'estimated'},
+                      'narration':{'mode':'volcengine' if narration else 'none','timing':timing['timing']},
                       'audio':[{'start':a['start'],'end':a['start']+a['duration'],'volume':a['volume']} for a in audio]}
         draft, style_root = compile_and_finish(settings, folder, build, spec, style_plan, resources, log)
         repair_material_durations(draft, settings, log)
@@ -147,4 +163,9 @@ class Worker:
                   'preview_mode': 'approximate', 'native_verified': False, 'selection': request['selection'],
                   'warnings': list(dict.fromkeys(warnings)), 'files': ['draft.zip', 'preview.mp4', 'cover.jpg', 'plan.json'],
                   'package_bytes': (folder / 'draft.zip').stat().st_size, 'shot_count': len(shots), 'caption_count': len(cues)}
+        if narration:
+            result['files'].append('narration.wav')
+            result['narration'] = {'provider': 'volcengine', 'speaker': request['tts_speaker'], 'speed': request['tts_speed']}
+        else:
+            result['narration'] = {'provider': 'none', 'fallback': bool(fallback)}
         store.update(job_id, 'ready', '草稿与近似预览可下载', 100, result=result)

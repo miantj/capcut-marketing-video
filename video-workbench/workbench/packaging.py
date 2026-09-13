@@ -91,7 +91,7 @@ def package_draft(draft, destination, title, duration):
         '页面视频为近似预览，字体、动画和布局可能与剪映不同；正式使用前请在剪映检查并导出。\n'
         '字体及原生文字动画使用目标电脑自己的剪映资源，不随包重新分发。\n'
         '导入前请在目标剪映使用悠然体，并下载“放大、波浪弹入、波浪弹出”文字动画。\n'
-        '此版本无自动配音。原素材音轨静音，只保留提供的背景音乐。\n', 'utf-8-sig')
+        '原素材音轨静音。启用火山口播的任务含独立 AI 配音轨，未启用时仅含背景音乐。\n', 'utf-8-sig')
     manifest = {'version': 1, 'draft_id': content['id'], 'title': title, 'duration': duration,
                 'preview': 'approximate', 'native_verified': False, 'files': {}, 'native_resources':[]}
     jy = Path(os.environ.get('LOCALAPPDATA',''))/'JianyingPro/User Data'

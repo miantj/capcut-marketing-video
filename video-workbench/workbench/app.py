@@ -11,11 +11,13 @@ from urllib.parse import urlparse
 from weakref import WeakValueDictionary
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from .config import ROOT, Settings
-from .models import FileRequest, JobRequest, LoginRequest, RevisionRequest
+from .models import FileRequest, JobRequest, LoginRequest, RevisionRequest, SpeechPreviewRequest
+from .tts import synthesize
+from .media import ProductionError
 from .store import Store
 from .worker import Worker
 
@@ -29,6 +31,7 @@ def create_app(settings=None, start_worker=True):
     worker = Worker(settings, store)
     upload_locks = WeakValueDictionary()
     mutation_lock = threading.RLock()
+    preview_lock = threading.Lock()
     session_secret = uuid.uuid4().hex
 
     @asynccontextmanager
@@ -106,7 +109,7 @@ def create_app(settings=None, start_worker=True):
     @app.get('/api/health')
     def health():
         return {'ready': bool(settings.ffmpeg and settings.capcut), 'ai_ready': settings.ai_ready,
-                'native_tts': False, 'native_export': False, 'max_file_bytes': settings.max_file,
+                'native_tts': False, 'tts_ready': settings.tts_ready, 'native_export': False, 'max_file_bytes': settings.max_file,
                 'max_job_bytes': settings.max_job, 'free_bytes': shutil.disk_usage(settings.data).free,
                 'scope': 'lan', 'templates': ['new', 'selling', 'promo']}
 
@@ -116,6 +119,26 @@ def create_app(settings=None, start_worker=True):
         queued = sorted((j for j in jobs if j['status'] == 'queued'), key=lambda j: j['created'])
         positions = {j['id']: i + 1 for i, j in enumerate(queued)}
         return [dict(public(j), queue_position=positions.get(j['id'])) for j in jobs]
+
+    @app.post('/api/tts/preview')
+    def speech_preview(body: SpeechPreviewRequest):
+        if not settings.tts_ready or not settings.ffmpeg:
+            raise HTTPException(409, '口播服务尚未配置完成')
+        if not body.text.strip():
+            raise HTTPException(422, '请先输入口播文案')
+        if not preview_lock.acquire(blocking=False):
+            raise HTTPException(429, '正在生成试听，请稍后再试')
+        directory = settings.data / 'tts-preview'
+        path = directory / (uuid.uuid4().hex + '.wav')
+        try:
+            directory.mkdir(exist_ok=True)
+            synthesize(settings, body.text, body.speaker, body.speed, path)
+            return Response(path.read_bytes(), media_type='audio/wav')
+        except ProductionError as exc:
+            raise HTTPException(502, str(exc)) from None
+        finally:
+            preview_lock.release()
+            path.unlink(missing_ok=True)
 
     @app.get('/api/jobs/{job_id}')
     def get(job_id: str):
@@ -272,7 +295,7 @@ def create_app(settings=None, start_worker=True):
         path = settings.data / 'jobs' / job_id / name
         if not path.is_file():
             raise HTTPException(404, '产物文件已丢失，请重新制作一个版本')
-        media = {'.zip': 'application/zip', '.mp4': 'video/mp4', '.jpg': 'image/jpeg', '.json': 'application/json'}
+        media = {'.zip': 'application/zip', '.mp4': 'video/mp4', '.wav': 'audio/wav', '.jpg': 'image/jpeg', '.json': 'application/json'}
         return FileResponse(path, media_type=media.get(path.suffix),
                             filename=f'{job["request"]["title"]}-v{job["revision"]}{path.suffix}' if name == 'draft.zip' else None,
                             headers={'Connection': 'close'})

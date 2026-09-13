@@ -4,7 +4,10 @@ This is a template-app adapter, not a declaration that workflow.build's semantic
 asset review or native editor acceptance has happened.
 """
 import json
+import hashlib
+import mmap
 import os
+import re
 from pathlib import Path
 
 from PIL import ImageFont
@@ -22,6 +25,33 @@ def youran_font_id(fonts):
     raise ProductionError('剪映字体列表中没有悠然体，请在剪映启用该字体后重试。')
 
 
+def builtin_font_metadata(font, apps):
+    """Resolve the installed built-in font table omitted by CLI cloud enums.
+
+    Only accept the adjacent filename/resource-ID entry when the app's font
+    bytes match our verified font. Do not guess an ID from a similarly named font.
+    """
+    fingerprint = hashlib.sha256(font.read_bytes()).hexdigest()
+    pattern = re.compile(re.escape(font.name.encode('utf-8')) + rb'\x00{1,16}([0-9]{18,20})\x00')
+    versions = sorted(apps.glob('*/VECreator.dll'), key=lambda p: tuple(
+        int(n) for n in re.findall(r'\d+', p.parent.name)), reverse=True)
+    for library in versions:
+        installed = library.parent / 'Resources/Font' / font.name
+        try:
+            if not installed.is_file() or hashlib.sha256(installed.read_bytes()).hexdigest() != fingerprint:
+                continue
+            with library.open('rb') as source, mmap.mmap(source.fileno(), 0, access=mmap.ACCESS_READ) as table:
+                hits = list(pattern.finditer(table))
+                ids = {hit[1].decode('ascii') for hit in hits}
+                if len(ids) == 1:
+                    return {'id': ids.pop(), 'source': 'installed_builtin_font_table',
+                            'library': str(library), 'table_offset': hits[0].start(),
+                            'installed_font': str(installed), 'sha256': fingerprint}
+        except (OSError, ValueError):
+            continue
+    raise ProductionError('无法核实悠然体的内置字体信息，请检查剪映安装是否完整。')
+
+
 def native_resources(folder):
     bootstrap = skill_module('bootstrap_resources')
     result = bootstrap.bootstrap(names=['放大', '波浪弹入', '波浪弹出'])
@@ -33,7 +63,11 @@ def native_resources(folder):
     family = ImageFont.truetype(str(font), 36).getname()[0]
     if family != 'HYYouRanTiJ':
         raise ProductionError('悠然体文件的字体 family 校验不一致。')
-    font_info = {'path': str(font), 'id': youran_font_id((result.get('meta') or {}).get('fonts')), 'family': family}
+    try:
+        identity = {'id': youran_font_id((result.get('meta') or {}).get('fonts')), 'source': 'cli_font_enums'}
+    except ProductionError:
+        identity = builtin_font_metadata(font, Path(os.environ.get('LOCALAPPDATA', '')) / 'JianyingPro/Apps')
+    font_info = {'path': str(font), **identity, 'family': family}
     resources = folder / 'native-resources.json'
     resources.write_text(json.dumps(result['resources'], ensure_ascii=False, indent=2), 'utf-8')
     (folder/'native-resources.meta.json').write_text(json.dumps({**result['meta'], 'font':font_info}, ensure_ascii=False, indent=2), 'utf-8')

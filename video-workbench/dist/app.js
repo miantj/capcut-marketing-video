@@ -23,8 +23,10 @@ async function api(path, options = {}) {
 function body() {
   return {title: $('title').value.trim(), owner: $('owner').value.trim(), script: $('script').value.trim(),
     template: document.querySelector('[name=template]:checked').value, ratio: $('ratio').value,
-    selection: $('selection').value, narration: 'none', bgm_volume: Number($('volume').value) / 100,
-    notes: $('notes').value.trim(), allow_cloud_analysis: $('allow-cloud').checked};
+    selection: $('selection').value, narration: $('narration').value,
+    tts_speaker: $('narration').value === 'none' ? 'zh_female_vv_uranus_bigtts' : ($('tts-voice').value === 'custom' ? $('tts-speaker').value.trim() : $('tts-voice').value),
+    tts_speed: Number($('tts-speed').value), bgm_volume: Number($('volume').value) / 100,
+    allow_cloud_analysis: $('allow-cloud').checked};
 }
 function renderFiles() {
   $('video-list').innerHTML = state.videos.map((file, i) => `<li class="file-row"><span class="file-name">${i+1}. ${esc(file.name)}</span><span class="file-size">${size(file.size)}</span><button type="button" data-move="${i}" data-direction="-1" aria-label="上移 ${esc(file.name)}" ${i === 0 ? 'disabled' : ''}>↑</button><button type="button" data-move="${i}" data-direction="1" aria-label="下移 ${esc(file.name)}" ${i === state.videos.length - 1 ? 'disabled' : ''}>↓</button><button type="button" data-remove="${i}" aria-label="移除 ${esc(file.name)}">×</button></li>`).join('');
@@ -67,6 +69,53 @@ $('video-list').addEventListener('click', e => {
 });
 $('script').addEventListener('input', () => $('word-count').textContent = `${$('script').value.length} / 3000`);
 $('volume').addEventListener('input', () => $('volume-value').textContent = `${$('volume').value}%`);
+function updateNarration() {
+  const enabled = $('narration').value === 'volcengine';
+  $('tts-settings').hidden = !enabled;
+  $('tts-custom-row').hidden = $('tts-voice').value !== 'custom';
+  $('tts-speaker').required = enabled && $('tts-voice').value === 'custom';
+  $('production-note').textContent = enabled ? '自动生成口播；接口不可用时自动回退为字幕 + 背景音乐。原视频静音。' : '不生成口播，按原流程制作字幕 + 背景音乐，原视频静音。';
+  $('timing-note').textContent = enabled ? '保留原文 · 字幕按实际口播时长对齐' : '保留原文 · 时长为文字估算，未对齐配音';
+}
+$('narration').addEventListener('change', updateNarration);
+$('tts-voice').addEventListener('change', updateNarration);
+let speechPreviewUrl, speechPreviewController;
+function clearSpeechPreview() {
+  speechPreviewController?.abort(); speechPreviewController = null;
+  $('tts-preview-audio').pause(); $('tts-preview-audio').removeAttribute('src');
+  $('tts-preview-result').hidden = true; $('tts-preview-download').removeAttribute('href');
+  if (speechPreviewUrl) { URL.revokeObjectURL(speechPreviewUrl); speechPreviewUrl = null; }
+  $('tts-preview').disabled = state.busy;
+  $('tts-preview').textContent = '生成试听（前 20 字）';
+}
+for (const id of ['script','narration','tts-voice','tts-speaker','tts-speed']) $(id).addEventListener('input', clearSpeechPreview);
+$('tts-preview').addEventListener('click', async () => {
+  const request = body();
+  if (!request.script) return formError('请先输入文案，再生成试听。');
+  clearSpeechPreview();
+  const controller = new AbortController(); speechPreviewController = controller;
+  const button = $('tts-preview'); button.disabled = true; button.textContent = '正在生成试听…';
+  try {
+    const response = await fetch('/api/tts/preview', {method:'POST', signal:controller.signal, headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({text:Array.from(request.script).slice(0,20).join(''), speaker:request.tts_speaker, speed:request.tts_speed})});
+    if (response.status === 401 && !$('login-dialog').open) $('login-dialog').showModal();
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}));
+      throw new Error(typeof data.detail === 'string' ? data.detail : '试听生成失败，请检查文案、音色和语速。');
+    }
+    const blob = await response.blob();
+    if (controller !== speechPreviewController) return;
+    speechPreviewUrl = URL.createObjectURL(blob);
+    $('tts-preview-audio').src = speechPreviewUrl;
+    $('tts-preview-download').href = speechPreviewUrl;
+    $('tts-preview-result').hidden = false; formError('');
+  } catch (error) { if (controller === speechPreviewController) formError(error.message); }
+  finally {
+    if (controller === speechPreviewController) {
+      speechPreviewController = null; button.disabled = state.busy; button.textContent = '生成试听（前 20 字）';
+    }
+  }
+});
 $('selection').addEventListener('change', () => { $('cloud-consent').hidden = $('selection').value !== 'ai'; $('allow-cloud').checked = false; });
 
 async function refresh() {
@@ -99,15 +148,24 @@ async function showDetail(id) {
     const job = await api(`/api/jobs/${id}`); state.detail = id;
     $('detail-title').textContent = `${job.request.title} · v${job.revision}`;
     $('detail-content').innerHTML = `${job.status === 'ready' ? `<video class="detail-video" controls playsinline preload="metadata" poster="${artifact(job,'cover.jpg')}" src="${artifact(job,'preview.mp4')}"></video><p class="detail-note">近似预览 · 请在剪映中确认字体、动画及最终布局</p><div class="detail-actions"><a class="primary" href="${artifact(job,'draft.zip')}" download>下载剪映草稿包</a><a class="secondary" href="${artifact(job,'preview.mp4')}" download>下载近似预览</a><button class="secondary" data-revise="${job.id}">修改一版</button></div><ul class="detail-warnings">${job.result.warnings.map(w => `<li>${esc(w)}</li>`).join('')}</ul>` : `<div class="banner ${job.error ? 'error' : ''}">${esc(job.error || job.stage)}</div>`}
-      <h3>视频文案</h3><div class="detail-script">${esc(job.request.script)}</div>${job.request.notes ? `<h3>备注</h3><div class="detail-script">${esc(job.request.notes)}</div>` : ''}<h3>制作记录</h3><ol class="event-list">${job.events.map(event => `<li>${date(event.at)} · ${esc(event.message)}</li>`).join('') || '<li>等待上传素材</li>'}</ol>`;
+      <h3>视频文案</h3><div class="detail-script">${esc(job.request.script)}</div><h3>制作记录</h3><ol class="event-list">${job.events.map(event => `<li>${date(event.at)} · ${esc(event.message)}</li>`).join('') || '<li>等待上传素材</li>'}</ol>`;
     if (!$('detail-dialog').open) $('detail-dialog').showModal();
+    if (job.status === 'ready' && job.result.files.includes('narration.wav')) {
+      $('detail-content').insertAdjacentHTML('beforeend', `<h3>AI 口播音频</h3><audio controls preload="metadata" src="${artifact(job,'narration.wav')}"></audio><p><a class="secondary" href="${artifact(job,'narration.wav')}" download>下载口播音频</a></p>`);
+    }
   } catch (error) { toast(error.message); }
 }
 function revise(id) {
   const job = state.jobs.find(j => j.id === id); if (!job || state.busy) return;
   state.revision = job;
+  clearSpeechPreview();
   const r = job.request;
-  for (const key of ['title','owner','script','ratio','selection','notes']) $(key).value = r[key];
+  $('narration').value = r.narration || 'none';
+  $('tts-voice').value = !r.tts_speaker || r.tts_speaker === 'zh_female_vv_uranus_bigtts' ? 'zh_female_vv_uranus_bigtts' : 'custom';
+  $('tts-speaker').value = r.tts_speaker || '';
+  setSpeechSpeed(r.tts_speed || 1);
+  updateNarration();
+  for (const key of ['title','owner','script','ratio','selection']) $(key).value = r[key];
   document.querySelector(`[name=template][value="${r.template}"]`).checked = true;
   $('volume').value = Math.round(r.bgm_volume * 100); $('volume-value').textContent = $('volume').value + '%';
   $('allow-cloud').checked = false; $('cloud-consent').hidden = r.selection !== 'ai';
@@ -121,7 +179,7 @@ function revise(id) {
 function exitRevision() {state.revision = null; $('media-fieldset').hidden = false; $('revision-banner').hidden = true; $('composer-title').textContent = '新建视频'; $('submit').textContent = '开始制作 ↗';}
 $('exit-revision').addEventListener('click', exitRevision);
 $('close-detail').addEventListener('click', () => $('detail-dialog').close());
-$('detail-dialog').addEventListener('close', () => { $('detail-content').querySelector('video')?.pause(); state.detail = null; });
+$('detail-dialog').addEventListener('close', () => { $('detail-content').querySelectorAll('video,audio').forEach(el => el.pause()); state.detail = null; });
 document.addEventListener('click', async e => {
   const button = e.target.closest('[data-detail],[data-revise],[data-cancel],[data-delete]'); if (!button) return;
   if (button.dataset.delete) {
@@ -165,6 +223,7 @@ $('job-form').addEventListener('submit', async e => {
   if (request.selection === 'ai' && !request.allow_cloud_analysis) return formError('使用 AI 选片前，请勾选关键帧分析授权。');
   const total = state.videos.reduce((n,f) => n + f.size, 0) + (state.music?.size || 0);
   if (!state.revision && total > 4 * 1024 ** 3) return formError('每个任务素材总大小最多 4GB。');
+  clearSpeechPreview();
   state.busy = true; $('job-form').classList.add('busy');
   const controls = Array.from($('job-form').querySelectorAll('input,textarea,select,button'));
   const disabledBefore = controls.map(el => el.disabled);
@@ -182,10 +241,10 @@ $('job-form').addEventListener('submit', async e => {
       await uploadFile(created, state.music, 'bgm', completed, total);
       await api(`/api/jobs/${created.id}/submit`, {method:'POST'});
     }
-    try {localStorage.setItem('video-owner', request.owner);} catch {}
+    savePreferences();
     toast('任务已提交，制作完成后可在右侧领取。');
     exitRevision(); state.videos = []; state.music = null; renderFiles();
-    $('script').value = ''; $('title').value = ''; $('notes').value = ''; $('word-count').textContent = '0 / 3000';
+    $('script').value = ''; $('title').value = ''; $('word-count').textContent = '0 / 3000';
     await refresh();
   } catch (error) {
     if (created) await api(`/api/jobs/${created.id}/cancel`, {method:'POST'}).catch(() => {});
@@ -210,12 +269,54 @@ async function init() {
     $('machine-state').textContent = state.health.ready ? '工作机已连接' : '工作机需要配置';
     $('submit').disabled = !state.health.ready;
     $('ai-option').disabled = !state.health.ai_ready;
+    $('tts-option').textContent = state.health.tts_ready ? '自动生成口播音频' : '自动生成口播音频（服务不可用时回退）';
+    updateNarration();
     $('ai-option').textContent = state.health.ai_ready ? 'AI 查看画面并匹配文案' : 'AI 匹配文案（待配置）';
     if (!state.health.ready) formError('工作机缺少视频处理工具，请联系管理员。');
     await refresh();
   } catch (error) {$('machine-state').textContent = '暂未连接'; formError(error.message);}
 }
-try {$('owner').value = localStorage.getItem('video-owner') || '';} catch {}
+const preferenceKey = 'video-workbench-preferences-v1';
+function setSpeechSpeed(value) {
+  const speed = String(value);
+  if (![...$('tts-speed').options].some(o => o.value === speed)) $('tts-speed').add(new Option(`${speed} 倍`, speed));
+  $('tts-speed').value = speed;
+}
+function savePreferences() {
+  try {
+    localStorage.setItem(preferenceKey, JSON.stringify({
+      owner: $('owner').value, narration: $('narration').value,
+      voice: $('tts-voice').value, speaker: $('tts-speaker').value, speed: Number($('tts-speed').value),
+      ratio: $('ratio').value, selection: $('selection').value,
+      template: document.querySelector('[name=template]:checked').value,
+      volume: Number($('volume').value)
+    }));
+  } catch {}
+}
+function restorePreferences() {
+  try {
+    const cached = JSON.parse(localStorage.getItem(preferenceKey) || '{}');
+    if (!cached || typeof cached !== 'object' || Array.isArray(cached)) throw new Error('Invalid preferences');
+    const owner = cached.owner ?? localStorage.getItem('video-owner');
+    if (typeof owner === 'string') $('owner').value = owner.slice(0,30);
+    if (['none','volcengine'].includes(cached.narration)) $('narration').value = cached.narration;
+    if (['zh_female_vv_uranus_bigtts','custom'].includes(cached.voice)) $('tts-voice').value = cached.voice;
+    if (typeof cached.speaker === 'string') $('tts-speaker').value = cached.speaker.slice(0,120);
+    if (typeof cached.speed === 'number' && Number.isFinite(cached.speed) && cached.speed >= .5 && cached.speed <= 2) {
+      setSpeechSpeed(cached.speed);
+    }
+    if (['9:16','16:9'].includes(cached.ratio)) $('ratio').value = cached.ratio;
+    if (['ordered','ai'].includes(cached.selection)) $('selection').value = cached.selection;
+    if (['new','selling','promo'].includes(cached.template)) document.querySelector(`[name=template][value="${cached.template}"]`).checked = true;
+    if (typeof cached.volume === 'number' && Number.isFinite(cached.volume) && cached.volume >= 0 && cached.volume <= 100) $('volume').value = cached.volume;
+  } catch {}
+  $('volume-value').textContent = `${$('volume').value}%`;
+  $('cloud-consent').hidden = $('selection').value !== 'ai';
+  updateNarration();
+}
+const preferenceInputs = new Set(['owner','narration','volume','tts-voice','tts-speaker','tts-speed','ratio','selection','template']);
+$('job-form').addEventListener('input', e => {if (preferenceInputs.has(e.target.id || e.target.name)) savePreferences();});
+restorePreferences();
 init();
 setInterval(() => {if (!document.hidden && !$('login-dialog').open) refresh();}, 4000);
 

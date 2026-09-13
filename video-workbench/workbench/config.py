@@ -18,6 +18,8 @@ class Settings:
     max_file: int = 1024 ** 3
     max_job: int = 4 * 1024 ** 3
     min_free: int = 2 * 1024 ** 3
+    tts_key: str = ''
+    tts_resource: str = 'seed-tts-2.0'
 
     @classmethod
     def load(cls):
@@ -40,7 +42,13 @@ class Settings:
         capcut = [shutil.which('node') or 'node', str(cli)] if cli.is_file() else []
         return cls(Path(os.environ.get('VIDEO_DATA_DIR', str(ROOT / 'data'))).resolve(), ffmpeg or '', capcut,
                    os.environ.get('VIDEO_ACCESS_CODE', ''), os.environ.get('VIDEO_AI_API_KEY', ''),
-                   os.environ.get('VIDEO_AI_MODEL', ''), os.environ.get('VIDEO_ENABLE_AI') == '1')
+                   os.environ.get('VIDEO_AI_MODEL', ''), os.environ.get('VIDEO_ENABLE_AI') == '1',
+                   tts_key=os.environ.get('VIDEO_TTS_API_KEY', ''),
+                   tts_resource=os.environ.get('VIDEO_TTS_RESOURCE_ID', 'seed-tts-2.0'))
+
+    @property
+    def tts_ready(self):
+        return bool(self.tts_key and self.tts_resource)
 
     @property
     def ai_ready(self):

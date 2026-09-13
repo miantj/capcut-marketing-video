@@ -31,7 +31,7 @@
             <p class="hint">顺序剪辑将按以下列表使用素材，可上下调整。请优先上传没有旧字幕的画面。</p>
             <label class="music-drop" id="music-drop" tabindex="0" role="button" aria-label="选择背景音乐"><input id="music" type="file" accept=".mp3,.wav,.m4a,.aac,.ogg,.flac" class="file-input"><span class="music-icon" aria-hidden="true">♫</span><span><strong id="music-label">添加背景音乐</strong><small id="music-meta">选择一首音乐 · MP3 / WAV / M4A 等</small></span><span class="text-button">选择文件</span></label>
           </fieldset>
-          <fieldset><legend><span class="step">02</span>视频文案</legend><label class="sr-only" for="script">视频文案</label><textarea id="script" name="script" rows="5" maxlength="3000" placeholder="粘贴最终文案，例如：&#10;秋天的第一件针织，选对版型很重要。&#10;柔软亲肤，轻松搭出日常好状态。" required></textarea><div class="textarea-footer"><span>保留原文 · 时长为文字估算，未对齐配音</span><span id="word-count">0 / 3000</span></div></fieldset>
+          <fieldset><legend><span class="step">02</span>视频文案</legend><label class="sr-only" for="script">视频文案</label><textarea id="script" name="script" rows="5" maxlength="3000" placeholder="粘贴最终文案，例如：&#10;秋天的第一件针织，选对版型很重要。&#10;柔软亲肤，轻松搭出日常好状态。" required></textarea><div class="textarea-footer"><span id="timing-note">保留原文 · 时长为文字估算，未对齐配音</span><span id="word-count">0 / 3000</span></div></fieldset>
           <fieldset><legend><span class="step">03</span>选择风格</legend>
             <div class="template-grid">
               <label class="template"><input type="radio" name="template" value="new" checked><span class="template-art new"><span>NEW<br>ARRIVALS</span><em>新品上新</em></span><strong>新品上新</strong><small>少标签 · 柔进入 · 字幕偏上</small></label>
@@ -40,9 +40,16 @@
             </div>
             <div class="two-cols settings"><label>画幅<select name="ratio" id="ratio"><option value="9:16">9:16 竖屏</option><option value="16:9">16:9 横屏</option></select></label><label>选片方式<select name="selection" id="selection"><option value="ordered">按素材顺序剪辑</option><option value="ai" id="ai-option" disabled>AI 匹配文案（待配置）</option></select></label></div>
             <label id="cloud-consent" class="check-label" hidden><input type="checkbox" id="allow-cloud">同意将文案和素材关键帧发送至 AI 服务进行选片。</label>
-            <div class="volume-row"><label for="volume">背景音乐音量</label><input type="range" id="volume" min="0" max="100" value="35"><output id="volume-value" for="volume">35%</output></div>
-            <div class="production-note">当前版本：纯字幕 + 背景音乐，原视频静音。自动配音尚未接通。</div>
-            <label class="notes-label" for="notes">备注 <span>可选</span></label><textarea id="notes" rows="2" maxlength="1000" placeholder="AI 选片可参考此处要求；顺序剪辑仅保存备注，不执行自由文字修改。"></textarea>
+            <div class="volume-row"><label for="volume">背景音乐音量</label><input type="range" id="volume" min="0" max="100" value="15"><output id="volume-value" for="volume">15%</output></div>
+            <label>自动口播<select id="narration"><option value="volcengine" id="tts-option" selected>自动生成口播音频</option><option value="none">不生成口播音频</option></select></label>
+            <div id="tts-settings" hidden>
+              <div class="two-cols settings"><label>音色<select id="tts-voice"><option value="zh_female_vv_uranus_bigtts">VV · 女声</option><option value="custom">其他已开通音色</option></select></label><label>语速<select id="tts-speed"><option value="0.75">0.75 倍</option><option value="1" selected>正常</option><option value="1.25">1.25 倍</option><option value="1.5">1.5 倍</option><option value="2">2 倍</option></select></label></div>
+              <label id="tts-custom-row" hidden>音色 ID<input id="tts-speaker" maxlength="120" placeholder="填写火山控制台的音色 ID"></label>
+              <p class="hint">启用后将文案发送至火山引擎生成 AI 口播，按账户规则计费。字幕和镜头按实际口播时长对齐。</p>
+              <button type="button" class="secondary" id="tts-preview">生成试听（前 20 字）</button>
+              <div id="tts-preview-result" hidden><p>口播试听</p><audio id="tts-preview-audio" controls></audio><p><a id="tts-preview-download" class="text-button" download="口播试听.wav">下载试听音频</a></p></div>
+            </div>
+            <div class="production-note" id="production-note">原视频静音，仅保留背景音乐。</div>
           </fieldset>
           <div id="form-error" class="banner error" role="alert" hidden></div>
           <div id="upload-progress" hidden><div class="progress-label"><span id="upload-stage">上传中</span><span id="upload-percent">0%</span></div><progress id="upload-bar" value="0" max="100"></progress></div>
