@@ -303,7 +303,10 @@ async function init() {
     $('tts-option').textContent = state.health.tts_ready ? '自动生成口播音频' : '自动生成口播音频（服务不可用时回退）';
     updateNarration();
     $('ai-option').textContent = state.health.ai_ready ? 'AI 查看画面并匹配文案' : 'AI 匹配文案（待配置）';
-    if (!state.health.ready) formError('工作机缺少视频处理工具，请联系管理员。');
+    if (!state.health.ready) {
+      const missing = [!state.health.ffmpeg && 'FFmpeg', !state.health.capcut && 'capcut-cli'].filter(Boolean);
+      formError(missing.length ? `工作机缺少 ${missing.join(' 和 ')}，无法开始制作。` : '工作机缺少视频处理工具，请联系管理员。');
+    }
     await refresh();
   } catch (error) {$('machine-state').textContent = '暂未连接'; $('machine-state').dataset.ready = 'false'; formError(error.message);}
 }

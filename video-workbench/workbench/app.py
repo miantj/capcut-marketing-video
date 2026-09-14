@@ -109,7 +109,8 @@ def create_app(settings=None, start_worker=True):
 
     @app.get('/api/health')
     def health():
-        return {'ready': bool(settings.ffmpeg and settings.capcut), 'ai_ready': settings.ai_ready,
+        return {'ready': bool(settings.ffmpeg and settings.capcut), 'ffmpeg': bool(settings.ffmpeg),
+                'capcut': bool(settings.capcut), 'ai_ready': settings.ai_ready,
                 'native_tts': False, 'tts_ready': settings.tts_ready, 'native_export': False, 'max_file_bytes': settings.max_file,
                 'max_job_bytes': settings.max_job, 'free_bytes': shutil.disk_usage(settings.data).free,
                 'scope': 'lan', 'templates': ['new', 'selling', 'promo']}

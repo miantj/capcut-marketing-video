@@ -30,7 +30,7 @@ npm install -g capcut-cli
 - 文案保留、逐屏字幕、3 个固定风格、横竖屏、原视频静音、音乐循环及首尾淡入淡出。
 - 通过本机 capcut-cli compile 生成真实的独立视频、音乐、文本轨；在隔离工作目录登记素材，不修改用户正在编辑的草稿库。
 - 复用 skill 的字幕样式处理及校验，写入悠然体、关键词高亮、气泡和各 0.5 秒的进出场动画；从实际草稿生成 FFmpeg + ASS 近似预览；检查预览时长、音轨、完整解码；打包前校验素材自包含和 ZIP 完整性。
-- 草稿包内含 Windows PowerShell 导入脚本：校验 SHA256、路径重定位、重复导入保护、索引备份及原子替换。运行前需退出剪映。目标电脑的具体剪映版本仍需打开验收。
+- 草稿包内含 Windows `Import-Draft.ps1` 与 Mac `Import-Draft.command`：校验 SHA256、路径重定位、重复导入保护、索引备份及原子替换。Mac 会写入 `draft_info.json` 并登记到剪映草稿库。运行前需退出剪映。目标电脑的具体剪映版本仍需打开验收。
 - 查看预览、下载草稿、新版本修改；旧文件与旧任务保留。
 
 ## 能力边界
@@ -64,7 +64,7 @@ python -m unittest discover -s tests -v
 - `workbench/store.py`：持久化队列和事件。
 - `workbench/worker.py`：单工位制作流水线。
 - `workbench/ai.py`：可选 AI 关键帧选片。
-- `workbench/packaging.py`、`scripts/Import-Draft.ps1`：可迁移草稿包与导入。
+- `workbench/packaging.py`、`scripts/Import-Draft.ps1`、`scripts/Import-Draft.command`：可迁移草稿包与导入。
 - `workbench/compat.py`：修复缺少 ffprobe 时的素材完整时长记录，提供中文预览适配。
 - `data/jobs/<id>/commands.jsonl`：本机处理日志；`error.log`：失败诊断。仅管理员本机读取。
 

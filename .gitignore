@@ -14,6 +14,7 @@ video-workbench/data/
 video-workbench/verification/
 video-workbench/.sites-runtime/
 capcut-marketing-video/.cache/
+剪映5.9/
 
 # Python / Node
 __pycache__/

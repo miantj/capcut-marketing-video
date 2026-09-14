@@ -37,7 +37,12 @@ class Worker:
                 except Exception as exc:
                     folder = self.settings.data / 'jobs' / job_id
                     (folder / 'error.log').write_text(traceback.format_exc(), 'utf-8')
-                    message = str(exc) if isinstance(exc, ProductionError) else '制作未完成，请管理员查看本机日志后重试。'
+                    if isinstance(exc, ProductionError):
+                        message = str(exc)
+                    elif isinstance(exc, FileNotFoundError):
+                        message = '制作未完成：本机缺少 capcut-cli 或剪映资源，请管理员查看 error.log 后重试。'
+                    else:
+                        message = '制作未完成，请管理员查看本机日志后重试。'
                     self.store.update(job_id, 'needs_attention', '需要处理', 0, error=message)
             else:
                 self.wake.wait(2)

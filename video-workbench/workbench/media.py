@@ -39,6 +39,14 @@ def failed_tool_message(completed):
         return '剪映正在运行，无法写入草稿。请保存并退出剪映后重试。'
     if text:
         return f'处理工具执行失败：{text[:240]}'
+    for line in reversed(blob.splitlines()):
+        line = line.strip()
+        if 'No such filter' in line:
+            return f'处理工具执行失败：{line[:240]}'
+    for line in reversed(blob.splitlines()):
+        line = line.strip()
+        if line.startswith('Error '):
+            return f'处理工具执行失败：{line[:240]}'
     return '处理工具执行失败，管理员可查看本机制作日志。'
 
 

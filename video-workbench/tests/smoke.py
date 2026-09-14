@@ -38,6 +38,8 @@ assert result['status'] == 'ready', result
 with zipfile.ZipFile(folder/'draft.zip') as archive:
     assert not archive.testzip()
     assert 'Import-Draft.ps1' in archive.namelist()
+    assert 'Import-Draft.command' in archive.namelist()
+    assert archive.getinfo('Import-Draft.command').external_attr >> 16 & 0o777 == 0o755
     manifest = json.loads(archive.read('manifest.json'))
     assert manifest['native_verified'] is False
     content = json.loads(archive.read('draft/draft_content.json'))

@@ -1,4 +1,6 @@
 import json
+import os
+import shutil
 import socket
 import sys
 import tempfile
@@ -13,7 +15,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from workbench.config import Settings
+from workbench.config import Settings, resolve_capcut, resolve_ffmpeg
 from workbench.compat import repair_material_durations
 from workbench.media import ProductionError, failed_tool_message, ordered_shots, script_cues, validate_shots, probe
 from workbench.packaging import replace_paths
@@ -72,6 +74,16 @@ class PlanningTests(unittest.TestCase):
         self.assertEqual(result['path'], '__DRAFT_ROOT__/assets/video.mp4')
         self.assertEqual(result['text'], content['text'])
 
+    def test_mac_native_paths_are_portable(self):
+        draft = Path('/tmp/jobs/one/draft')
+        font = Path('/Applications/VideoFusion-macOS.app/Contents/Resources/Font/悠然体.ttf')
+        effect = Path.home() / 'Movies/JianyingPro/User Data/Cache/effect/abc/config.json'
+        content = {'font_path': str(font), 'path': str(effect), 'text': '请使用 ' + str(font) + ' 文件'}
+        result = replace_paths(content, draft, draft.parent)
+        self.assertEqual(result['font_path'], '__JY_FONT_ROOT__/悠然体.ttf')
+        self.assertEqual(result['path'], '__JY_EFFECT_ROOT__/abc/config.json')
+        self.assertEqual(result['text'], content['text'])
+
 
 class ToolFailureTests(unittest.TestCase):
     def test_editor_open_is_explained(self):
@@ -87,6 +99,10 @@ class ToolFailureTests(unittest.TestCase):
     def test_blank_failure_keeps_generic_message(self):
         completed = SimpleNamespace(returncode=1, stdout='', stderr='ffmpeg boom\n')
         self.assertEqual(failed_tool_message(completed), '处理工具执行失败，管理员可查看本机制作日志。')
+
+    def test_missing_filter_is_surfaced(self):
+        completed = SimpleNamespace(returncode=8, stdout='', stderr="[AVFilterGraph] No such filter: 'ass'\nError : Filter not found\n")
+        self.assertIn("No such filter: 'ass'", failed_tool_message(completed))
 
 
 class IsolatedDraftWriteTests(unittest.TestCase):
@@ -300,6 +316,40 @@ class ApiTests(unittest.TestCase):
             self.assertEqual(self.call('/api/login','POST',{'code':'x'})[0],401)
         finally:
             self.settings.access_code = ''
+
+
+class CapcutResolveTests(unittest.TestCase):
+    def test_uses_explicit_cli_and_path_binary(self):
+        with tempfile.TemporaryDirectory() as temp:
+            cli = Path(temp) / 'index.js'
+            cli.write_text('module.exports = {}', encoding='utf-8')
+            self.assertEqual(resolve_capcut({'VIDEO_CAPCUT_JS': str(cli)}), [shutil.which('node') or 'node', str(cli)])
+            self.assertEqual(resolve_capcut({'VIDEO_CAPCUT_JS': str(Path(temp) / 'missing.js')}), [])
+            binary = Path(temp) / 'capcut'
+            binary.write_text('', encoding='utf-8')
+            binary.chmod(0o755)
+            with patch.dict(os.environ, {'PATH': temp, 'PATHEXT': ''}, clear=False):
+                self.assertEqual(resolve_capcut({}), [str(binary)])
+
+    def test_skill_capcut_cmd_resolves_local_cli(self):
+        from workbench.skill_timing import skill_root
+        scripts = str(skill_root() / 'scripts')
+        sys.path.insert(0, scripts)
+        try:
+            import capcut_bin
+            capcut_bin.capcut_cmd.cache_clear()
+            cmd = capcut_bin.capcut_cmd()
+            self.assertTrue(Path(cmd).is_file())
+            self.assertTrue('capcut' in Path(cmd).name)
+        finally:
+            sys.path.remove(scripts)
+
+    def test_prefers_ffmpeg_with_ass_filter(self):
+        with patch.dict(os.environ, {'VIDEO_FFMPEG': '/brew/ffmpeg'}, clear=False), \
+             patch('workbench.config.shutil.which', return_value='/brew/ffmpeg'), \
+             patch('workbench.config.ffmpeg_has_filter', side_effect=lambda path, name: 'imageio' in path), \
+             patch('imageio_ffmpeg.get_ffmpeg_exe', return_value='/venv/imageio-ffmpeg'):
+            self.assertEqual(resolve_ffmpeg(), '/venv/imageio-ffmpeg')
 
 
 if __name__ == '__main__':

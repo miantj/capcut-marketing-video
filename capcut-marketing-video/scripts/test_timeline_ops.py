@@ -85,6 +85,13 @@ class TimelineOpsTests(unittest.TestCase):
 
 
 class ResourcePathTests(unittest.TestCase):
+    def test_resolves_effect_id_when_resource_id_missing(self):
+        with tempfile.TemporaryDirectory() as temp:
+            cached = Path(temp) / '1644264' / 'pkg'
+            cached.mkdir(parents=True)
+            found = resolve_path('6724919499042066958', '', [Path(temp)], effect_id='1644264')
+            self.assertEqual(found, cached)
+
     def test_effect_cache_resolution_when_present(self):
         roots = effect_roots()
         if not roots:

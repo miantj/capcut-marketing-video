@@ -52,21 +52,47 @@ def builtin_font_metadata(font, apps):
     raise ProductionError('无法核实悠然体的内置字体信息，请检查剪映安装是否完整。')
 
 
+def editor_user_data():
+    home = Path.home()
+    return [
+        Path(os.environ.get('LOCALAPPDATA', '')) / 'JianyingPro/User Data',
+        home / 'Library/Containers/com.lemon.lvpro/Data/Movies/JianyingPro/User Data',
+        home / 'Library/Containers/com.lemon.lvoverseas/Data/Movies/CapCut/User Data',
+        home / 'Movies/JianyingPro/User Data',
+        home / 'Movies/CapCut/User Data',
+    ]
+
+
+def youran_font_file():
+    for root in editor_user_data():
+        font = root / 'Resources/Font/悠然体.ttf'
+        if font.is_file():
+            return font
+    bundled = Path('/Applications/VideoFusion-macOS.app/Contents/Resources/Font/悠然体.ttf')
+    return bundled if bundled.is_file() else None
+
+
 def native_resources(folder):
     bootstrap = skill_module('bootstrap_resources')
     result = bootstrap.bootstrap(names=['放大', '波浪弹入', '波浪弹出'])
     if not result['ok']:
         raise ProductionError('剪映文字动画资源尚未缓存，请在剪映下载“放大、波浪弹入、波浪弹出”后重试。')
-    font = Path(os.environ.get('LOCALAPPDATA', '')) / 'JianyingPro/User Data/Resources/Font/悠然体.ttf'
-    if not font.is_file():
-        raise ProductionError('没有找到剪映悠然体，请在剪映中启用该字体后重试。')
+    font = youran_font_file()
+    if not font:
+        raise ProductionError('本机未找到剪映悠然体。请安装剪映并启用该字体后重试。')
     family = ImageFont.truetype(str(font), 36).getname()[0]
     if family != 'HYYouRanTiJ':
         raise ProductionError('悠然体文件的字体 family 校验不一致。')
     try:
         identity = {'id': youran_font_id((result.get('meta') or {}).get('fonts')), 'source': 'cli_font_enums'}
     except ProductionError:
-        identity = builtin_font_metadata(font, Path(os.environ.get('LOCALAPPDATA', '')) / 'JianyingPro/Apps')
+        try:
+            apps = next((root.parent / 'Apps' for root in editor_user_data() if (root.parent / 'Apps').is_dir()), Path())
+            identity = builtin_font_metadata(font, apps)
+        except ProductionError:
+            if family != 'HYYouRanTiJ':
+                raise
+            identity = {'id': '6740436145831678467', 'source': 'known_youran_id'}
     font_info = {'path': str(font), **identity, 'family': family}
     resources = folder / 'native-resources.json'
     resources.write_text(json.dumps(result['resources'], ensure_ascii=False, indent=2), 'utf-8')

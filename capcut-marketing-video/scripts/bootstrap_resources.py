@@ -7,9 +7,12 @@ only give resource_id/md5; this script resolves Cache/effect/{resource_id}/{md5}
 from __future__ import annotations
 
 import argparse
+import io
 import json
 import os
 import subprocess
+import urllib.request
+import zipfile
 from pathlib import Path
 
 from capcut_bin import capcut_cmd
@@ -17,6 +20,7 @@ from design_allowlist import DEFAULT_ANIMATION_NAMES
 
 
 DEFAULT_NAMES = DEFAULT_ANIMATION_NAMES
+EFFECT_CDN = 'https://lf3-effectcdn-tos.byteeffecttos.com/obj/ies.fe.effect/'
 
 
 def write(path, value):
@@ -43,25 +47,48 @@ def effect_roots():
     return [p for p in candidates if p.is_dir()]
 
 
-def resolve_path(resource_id, md5, roots=None):
+def resolve_path(resource_id, md5, roots=None, effect_id=None):
     roots = roots or effect_roots()
-    if not resource_id:
+    keys = [str(key) for key in (resource_id, effect_id) if key]
+    if not keys:
         return None
     for root in roots:
-        base = root / str(resource_id)
-        if md5:
-            candidate = base / md5
-            if candidate.is_dir():
-                return candidate
-        if base.is_dir():
-            children = [p for p in base.iterdir() if p.is_dir()]
-            if len(children) == 1:
-                return children[0]
+        for key in keys:
+            base = root / key
             if md5:
-                for child in children:
-                    if md5 in child.name:
-                        return child
+                candidate = base / md5
+                if candidate.is_dir():
+                    return candidate
+            if base.is_dir():
+                children = [p for p in base.iterdir() if p.is_dir()]
+                if len(children) == 1:
+                    return children[0]
+                if md5:
+                    for child in children:
+                        if md5 in child.name:
+                            return child
     return None
+
+
+def fetch_effect(resource_id, md5, roots):
+    if not resource_id or not md5 or not roots:
+        return None
+    dest = Path(roots[0]) / str(resource_id) / md5
+    if (dest / 'config.json').is_file():
+        return dest
+    try:
+        with urllib.request.urlopen(EFFECT_CDN + md5, timeout=60) as response:
+            payload = response.read()
+        dest.mkdir(parents=True, exist_ok=True)
+        with zipfile.ZipFile(io.BytesIO(payload)) as archive:
+            for info in archive.infolist():
+                name = Path(info.filename).name
+                if info.is_dir() or not name or name.startswith('.') or info.filename.startswith('__MACOSX'):
+                    continue
+                (dest / name).write_bytes(archive.read(info))
+    except (OSError, zipfile.BadZipFile):
+        return None
+    return dest if (dest / 'config.json').is_file() else None
 
 
 def enums(kind, jianying=True):
@@ -97,7 +124,7 @@ def animation_object(name, meta, kind, roots):
     resource_id = meta.get('resource_id') or ''
     md5 = meta.get('md5') or ''
     effect_id = meta.get('effect_id') or ''
-    path = resolve_path(resource_id, md5, roots)
+    path = resolve_path(resource_id, md5, roots, effect_id=effect_id) or fetch_effect(resource_id, md5, roots)
     category = 'in_fav' if kind == 'intro' else 'out_fav'
     return dict(
         name=name,

@@ -85,7 +85,7 @@ try {
         if (-not (Test-Path -LiteralPath $resourcePath)) { throw "剪映缺少资源：$($resource.name)。请先在剪映中下载该字体或文字动画，再重试。" }
     }
     foreach ($entry in $manifest.files.PSObject.Properties) {
-        if ($entry.Name -in @('Import-Draft.ps1', '使用说明.txt')) { continue }
+        if ($entry.Name -in @('Import-Draft.ps1', 'Import-Draft.command', '使用说明.txt')) { continue }
         $relative = $entry.Name.Replace('/', [IO.Path]::DirectorySeparatorChar)
         $itemPath = [IO.Path]::GetFullPath([IO.Path]::Combine($packageRoot, $relative))
         if (-not $itemPath.StartsWith($packageRoot + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
