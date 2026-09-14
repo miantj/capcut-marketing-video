@@ -11,7 +11,7 @@ cd D:\yisho\video-workbench
 .\start.ps1
 ```
 
-浏览器打开 http://localhost:8765 。同事使用工作机的公司局域网 IPv4 地址和端口 8765。保持电脑开机；使用单个服务进程，不能设置多个 Uvicorn workers。首次 Windows 防火墙提示时只允许公司使用的网络配置；如果同事无法连接，由管理员按公司规则开放 TCP 8765。不要把此试用服务直接暴露到公网。
+浏览器打开 http://localhost:8766 。同事使用工作机的公司局域网 IPv4 地址和端口 8766。保持电脑开机；使用单个服务进程，不能设置多个 Uvicorn workers。首次 Windows 防火墙提示时只允许公司使用的网络配置；如果同事无法连接，由管理员按公司规则开放 TCP 8766。不要把此试用服务直接暴露到公网。
 
 其他工作机需要 Python 3.12 或更新版本、Node.js、剪映桌面版，以及完整的 `capcut-marketing-video` skill（可通过 `VIDEO_SKILL_DIR` 指定）。安装依赖：
 

@@ -7,7 +7,7 @@ with sync_playwright() as p:
     page=browser.new_page(viewport={'width':1440,'height':1100}, accept_downloads=True)
     errors=[]
     page.on('pageerror',lambda e: errors.append(str(e)))
-    page.goto('http://127.0.0.1:8765')
+    page.goto('http://127.0.0.1:8766')
     page.wait_for_function("() => !document.getElementById('tts-option').disabled")
     page.locator('#script').fill('你好，这是视频工作台的自动口播测试。')
     page.locator('#narration').select_option('volcengine')

@@ -13,7 +13,7 @@ with sync_playwright() as p:
     page = context.new_page()
     errors = []
     page.on('pageerror', lambda error: errors.append(str(error)))
-    page.goto(os.environ.get('VIDEO_TEST_URL', 'http://127.0.0.1:8765'))
+    page.goto(os.environ.get('VIDEO_TEST_URL', 'http://127.0.0.1:8766'))
     page.get_by_text('工作机已连接', exact=True).wait_for()
     page.locator('#title').fill('流程验收 · 可编辑草稿')
     page.locator('#owner').fill('系统验收')

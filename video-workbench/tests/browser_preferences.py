@@ -10,7 +10,7 @@ with sync_playwright() as p:
     errors = []
     page.on('pageerror', lambda e: errors.append(str(e)))
     page.route('**/api/health', lambda route: route.fulfill(json={'ready':True,'ai_ready':True,'tts_ready':False}))
-    page.goto('http://127.0.0.1:8765')
+    page.goto('http://127.0.0.1:8766')
     page.get_by_text('工作机已连接',exact=True).wait_for()
     assert page.locator('#narration').input_value() == 'volcengine'
     assert not page.locator('#tts-option').is_disabled()
@@ -103,7 +103,7 @@ with sync_playwright() as p:
     blocked = browser.new_context()
     blocked.add_init_script("Object.defineProperty(window, 'localStorage', {get() {throw new Error('blocked')}})")
     other = blocked.new_page()
-    other.goto('http://127.0.0.1:8765')
+    other.goto('http://127.0.0.1:8766')
     other.get_by_text('工作机已连接',exact=True).wait_for()
     other.locator('#narration').select_option('none')
     assert other.locator('#tts-settings').is_hidden()

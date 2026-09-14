@@ -88,7 +88,7 @@ class Store:
                 # Refuse links/junctions instead of following them outside the task.
                 if folder.exists():
                     entries = [folder, *folder.rglob('*')]
-                    if any(p.is_symlink() or p.is_junction() for p in entries):
+                    if any(p.is_symlink() or getattr(p, 'is_junction', lambda: False)() for p in entries):
                         return 'unsafe'
                     shutil.rmtree(folder)
             except OSError:

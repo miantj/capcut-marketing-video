@@ -1,4 +1,4 @@
-param([int]$Port = 8765, [string]$ListenAddress = '0.0.0.0')
+param([int]$Port = 8766, [string]$ListenAddress = '0.0.0.0')
 $ErrorActionPreference = 'Stop'
 Set-Location -LiteralPath $PSScriptRoot
 $pythonExecutable = Join-Path $PSScriptRoot '.venv\Scripts\python.exe'

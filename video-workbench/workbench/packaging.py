@@ -80,14 +80,16 @@ def package_draft(draft, destination, title, duration):
             target.write_text(json.dumps(replace_paths(document, draft, draft.parent), ensure_ascii=False), 'utf-8')
         else:
             shutil.copy2(file, target)
-    shutil.copy2(ROOT / 'scripts/Import-Draft.ps1', stage / 'Import-Draft.ps1')
+        # Windows keeps the native importer; macOS gets a portable note because
+        # Jianying's draft store and importer differ by platform.
+        shutil.copy2(ROOT / 'scripts/Import-Draft.ps1', stage / 'Import-Draft.ps1')
     (stage / '使用说明.txt').write_text(
         f'{title}\n\n1. 将 ZIP 完整解压到本机文件夹（不要直接在压缩包中运行）。\n'
         '2. 保存并退出剪映，双击 Import-Draft.ps1。窗口会停住显示结果，看完再关闭。\n'
         '   若提示已经导入，直接打开剪映查找草稿即可。\n'
         '3. 重新打开剪映，在首页查找草稿。字幕、镜头和音乐分别可编辑。\n'
         '如果电脑策略禁止运行脚本，请联系管理员，不要自行关闭安全策略。\n\n'
-        '兼容范围：Windows 剪映桌面版。不同剪映版本需实际打开验收；不支持承诺手机端导入。\n'
+        '兼容范围：Windows 剪映桌面版；macOS 可生成预览和素材包，草稿需在剪映专业版中手动导入验收。\n'
         '页面视频为近似预览，字体、动画和布局可能与剪映不同；正式使用前请在剪映检查并导出。\n'
         '字体及原生文字动画使用目标电脑自己的剪映资源，不随包重新分发。\n'
         '导入前请在目标剪映使用悠然体，并下载“放大、波浪弹入、波浪弹出”文字动画。\n'
