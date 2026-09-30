@@ -89,6 +89,30 @@ def probe(ffmpeg, path):
     return {'duration': duration, 'width': width, 'height': height, 'video': bool(video), 'audio': audio}
 
 
+_PUNCT_ONLY = re.compile(r'^[，。！？；、…—\-]+$')
+
+
+def _coalesce_punct_only(lines):
+    # Length cuts can orphan a trailing comma onto its own cue; Volcengine then
+    # returns 45002001 (No readable text) and the whole narration falls back.
+    coalesced, pending = [], ''
+    for line in lines:
+        if _PUNCT_ONLY.fullmatch(line):
+            if coalesced:
+                coalesced[-1] += line
+            else:
+                pending += line
+            continue
+        coalesced.append(pending + line)
+        pending = ''
+    if pending:
+        if coalesced:
+            coalesced[-1] += pending
+        else:
+            coalesced.append(pending)
+    return coalesced
+
+
 def script_cues(text, *, limit_estimate=True, merge_short=True):
     from .skill_timing import estimate
     # Keep every non-whitespace character; split at punctuation before using a length cap.
@@ -99,10 +123,13 @@ def script_cues(text, *, limit_estimate=True, merge_short=True):
         while len(piece) > 24:
             cut = piece.rfind(' ', 0, 24)
             cut = cut if cut >= 12 else 24
-            lines.append(piece[:cut].strip())
+            chunk = piece[:cut].strip()
             piece = piece[cut:].strip()
+            if chunk:
+                lines.append(chunk)
         if piece:
             lines.append(piece)
+    lines = _coalesce_punct_only(lines)
     if re.sub(r'\s', '', ''.join(lines)) != re.sub(r'\s', '', text):
         raise ProductionError('文案分句校验未通过，请检查特殊字符。')
     cues = estimate(lines)

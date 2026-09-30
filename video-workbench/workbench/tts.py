@@ -48,6 +48,8 @@ def read_audio(response):
             code = event.get('code', 0)
             if code not in (0, 20000000):
                 # Do not expose provider messages, which can echo submitted values.
+                if int(code) == 45002001:
+                    raise SpeechServiceError('火山口播生成失败（错误码 45002001）：分段文案没有可读文字（多为纯标点），请缩短或改写该句后重试。')
                 raise SpeechServiceError(f'火山口播生成失败（错误码 {int(code)}），请检查服务额度、资源和音色权限。')
             if event.get('data'):
                 chunk = base64.b64decode(event['data'], validate=True)

@@ -30,6 +30,20 @@ class PlanningTests(unittest.TestCase):
         cues = script_cues(text, limit_estimate=False)
         self.assertEqual(''.join(c['text'] for c in cues), text)
         self.assertGreater(sum(c['duration'] for c in cues), 180)
+
+    def test_length_cut_does_not_orphan_punctuation_for_tts(self):
+        # 24-char hard cut used to leave a lone "，" cue; Volcengine 45002001.
+        text = ('做女装实体店的姐妹，是不是有过这种情况——店里卖爆的款，顾客回头一搜就找到同款，'
+                '直接上网买，谁还来我店里？\n这个担心，一手懂。一手app成立的初心就是为了服务女装实体店主，'
+                '所以我们设置了店主认证，我们想干的事就一件——帮实体店主做好生意。'
+                '一手app覆盖了全国热门服装批发市场的上万家档口，让你足不出户就能安心选款，'
+                '安心卖货，省时，省事，更省心！\n点击下方链接下载一手APP，专为服装店主服务的拿货平台！')
+        cues = script_cues(text, limit_estimate=False, merge_short=False)
+        import re
+        self.assertEqual(re.sub(r'\s', '', ''.join(c['text'] for c in cues)), re.sub(r'\s', '', text))
+        for cue in cues:
+            self.assertRegex(cue['text'], r'[\w\u4e00-\u9fff]', msg=repr(cue['text']))
+        self.assertTrue(any(c['text'].endswith('口，') or '档口，让你' in c['text'] for c in cues))
     def test_preserves_copy_and_timings(self):
         text = '秋季新品，价格99.9元！优惠截止9月30日。\n尺码 XS / S / M，咨询客服。'
         cues = script_cues(text)
