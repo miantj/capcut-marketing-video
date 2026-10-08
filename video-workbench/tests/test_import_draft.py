@@ -11,9 +11,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from workbench.config import ROOT
-from workbench.packaging import package_draft
+from workbench.packaging import MAC_IMPORT_NAME, WINDOWS_IMPORT_NAME, package_draft
 
 IMPORTER = ROOT / 'scripts/Import-Draft.command'
+SKIP_IMPORT_SCRIPTS = {MAC_IMPORT_NAME, WINDOWS_IMPORT_NAME,
+                       '点击导入草稿文件.command', '点击导入草稿文件.ps1',
+                       'Import-Draft.command', 'Import-Draft.ps1', '使用说明.txt'}
 
 
 def digest(path):
@@ -37,12 +40,12 @@ class MacImportTests(unittest.TestCase):
             package_draft(draft, dest, '标题', 1)
             with zipfile.ZipFile(dest) as archive:
                 names = archive.namelist()
-                self.assertIn('Import-Draft.command', names)
-                self.assertIn('Import-Draft.ps1', names)
-                mode = archive.getinfo('Import-Draft.command').external_attr >> 16
+                self.assertIn(MAC_IMPORT_NAME, names)
+                self.assertIn(WINDOWS_IMPORT_NAME, names)
+                mode = archive.getinfo(MAC_IMPORT_NAME).external_attr >> 16
                 self.assertEqual(mode & 0o777, 0o755)
                 note = archive.read('使用说明.txt').decode('utf-8-sig')
-                self.assertIn('Import-Draft.command', note)
+                self.assertIn(MAC_IMPORT_NAME, note)
 
     def test_command_registers_mac_draft(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -98,11 +101,11 @@ class MacImportTests(unittest.TestCase):
         (draft / 'draft_meta_info.json').write_text(json.dumps({
             'draft_id': 'mac-1', 'draft_name': 'Mac草稿', 'draft_cover': 'draft_cover.jpg',
         }), encoding='utf-8')
-        shutil.copy2(IMPORTER, package / 'Import-Draft.command')
-        (package / 'Import-Draft.command').chmod(0o755)
+        shutil.copy2(IMPORTER, package / MAC_IMPORT_NAME)
+        (package / MAC_IMPORT_NAME).chmod(0o755)
         files = {}
         for file in package.rglob('*'):
-            if file.is_file() and file.name not in {'Import-Draft.command', 'Import-Draft.ps1', '使用说明.txt'}:
+            if file.is_file() and file.name not in SKIP_IMPORT_SCRIPTS:
                 files[file.relative_to(package).as_posix()] = digest(file)
         (package / 'manifest.json').write_text(json.dumps({
             'draft_id': 'mac-1', 'title': 'Mac草稿',
@@ -134,7 +137,7 @@ class MacImportTests(unittest.TestCase):
             'VIDEO_IMPORT_EFFECT_ROOT': str(effects),
         })
         return subprocess.run(
-            ['bash', str(package / 'Import-Draft.command'), '--store', str(store)],
+            ['bash', str(package / MAC_IMPORT_NAME), '--store', str(store)],
             cwd=package, env=env, capture_output=True, text=True)
 
 

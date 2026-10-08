@@ -90,6 +90,8 @@ def render_chinese_preview(settings, draft, output, folder, log):
     shutil.copy2(subtitle_report['font_paths'][0], font_dir / 'HYYouRanTiJ.ttf')
     font_folder = font_dir.resolve().as_posix().replace(':', '\\:')
     graph = align_render_frames(report['filterComplex'], document, report['fps'])
+    # Older FFmpeg builds reject amix's normalize option; their default is valid here.
+    graph = graph.replace(':normalize=0', '')
     graph += f";{label}ass=filename='preview-subtitles.ass':fontsdir='{font_folder}'[styledtext]"
     label = '[styledtext]'
     args[graph_index], args[map_index] = graph, label

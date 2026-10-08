@@ -2,11 +2,15 @@
 cd "$(dirname "$0")"
 if ! command -v python3 >/dev/null 2>&1; then
   echo "需要 python3 才能导入草稿。"
-  read -r _
+  if [ -t 0 ] && [ -z "${VIDEO_IMPORT_NO_PAUSE:-}" ]; then
+    printf '\n按 Enter 关闭窗口'
+    read -r _
+  fi
   exit 1
 fi
 export PYTHONUTF8=1
-exec python3 - "$@" <<'PY'
+# stdin is the heredoc; keep the Terminal window open in the shell after Python exits.
+python3 - "$@" <<'PY'
 import fcntl
 import hashlib
 import json
@@ -19,20 +23,13 @@ import tempfile
 from datetime import datetime
 from pathlib import Path
 
-SKIP = {'Import-Draft.ps1', 'Import-Draft.command', '使用说明.txt'}
+SKIP = {'点击导入草稿文件-Windows.ps1', '点击导入草稿文件-Mac.command',
+        '点击导入草稿文件.ps1', '点击导入草稿文件.command',
+        'Import-Draft.ps1', 'Import-Draft.command', '使用说明.txt'}
 
 
 def die(message):
     raise SystemExit('导入失败：' + message)
-
-
-def pause():
-    if os.environ.get('VIDEO_IMPORT_NO_PAUSE'):
-        return
-    try:
-        input('\n按 Enter 关闭窗口')
-    except EOFError:
-        pass
 
 
 def json_escape(value):
@@ -119,7 +116,7 @@ def main(argv):
     source = package / 'draft'
     manifest_path = package / 'manifest.json'
     if not manifest_path.is_file() or not source.is_dir():
-        die('请先把 ZIP 完整解压到文件夹，再运行 Import-Draft.command。')
+        die('请先把 ZIP 完整解压到文件夹，再运行“点击导入草稿文件-Mac.command”。')
     manifest = json.loads(manifest_path.read_text(encoding='utf-8-sig'))
     draft_id = str(manifest.get('draft_id') or '')
     if not re.fullmatch(r'[A-Za-z0-9-]+', draft_id):
@@ -240,11 +237,14 @@ if __name__ == '__main__':
     except SystemExit as exc:
         if exc.code not in (0, None):
             print(exc)
-            pause()
             raise
     except Exception as exc:
         print('导入失败：' + str(exc))
-        pause()
         raise SystemExit(1)
-    pause()
 PY
+status=$?
+if [ -t 0 ] && [ -z "${VIDEO_IMPORT_NO_PAUSE:-}" ]; then
+  printf '\n按 Enter 关闭窗口'
+  read -r _
+fi
+exit "$status"

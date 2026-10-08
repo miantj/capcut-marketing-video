@@ -5,8 +5,8 @@
   <title>一手 · 视频工作台</title>
   <meta name="description" content="上传素材、音乐和文案，制作可编辑的剪映草稿。内部视频工作台。">
   <link rel="icon" href="/favicon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/style.css">
-  <script src="/app.js" defer></script>
+  <link rel="stylesheet" href="/style.css?v=20260408-speedup2">
+  <script src="/app.js?v=20260408-speedup2" defer></script>
 </head>
 <body>
   <header class="topbar">
@@ -74,6 +74,16 @@
   </main>
   <dialog id="detail-dialog" aria-labelledby="detail-title"><div class="dialog-head"><div><span class="section-label">任务详情</span><h2 id="detail-title"></h2></div><button class="icon-button" id="close-detail" aria-label="关闭详情">×</button></div><div id="detail-content"></div></dialog>
   <dialog id="login-dialog" aria-labelledby="login-title"><form id="login-form"><h2 id="login-title">进入团队工作台</h2><p>输入管理员提供的访问码。</p><label>团队访问码<input id="access-code" type="password" autocomplete="current-password" required></label><p id="login-error" class="error-text" role="alert"></p><button class="primary" type="submit">进入工作台</button></form></dialog>
+  <dialog id="speedup-dialog" aria-labelledby="speedup-title">
+    <div class="dialog-head"><div><span class="section-label">需要确认</span><h2 id="speedup-title">加快语速后继续？</h2></div></div>
+    <p id="speedup-message" class="speedup-copy"></p>
+    <ul id="speedup-facts" class="speedup-facts"></ul>
+    <p class="hint">也可返回缩短文案或补充更长素材，再重新制作。</p>
+    <div class="dialog-actions">
+      <button type="button" id="speedup-cancel" class="secondary">返回修改</button>
+      <button type="button" id="speedup-confirm" class="primary">确认加速并制作</button>
+    </div>
+  </dialog>
   <div id="toast" role="status" hidden></div>
 </body>
 </html>

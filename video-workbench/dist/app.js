@@ -10,23 +10,73 @@ const artifact = (job, name) => `/api/jobs/${encodeURIComponent(job.id)}/artifac
 let toastTimer;
 function toast(message) { $('toast').textContent = message; $('toast').hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => $('toast').hidden = true, 4500); }
 function formError(message) { $('form-error').textContent = message; $('form-error').hidden = !message; }
+function detailMessage(detail, status) {
+  if (Array.isArray(detail)) return detail.map(x => `${x.loc?.at(-1) || ''}：${x.msg}`).join('；');
+  if (detail && typeof detail === 'object') return detail.message || detail.code || `请求失败（${status || ''}）`;
+  if (typeof detail === 'string' && detail !== '[object Object]') return detail;
+  return status ? `请求失败（${status}）` : '请求失败';
+}
+function errorMessage(error) {
+  if (!error) return '请求失败';
+  if (error.detail) return detailMessage(error.detail, error.status);
+  if (typeof error.message === 'string' && error.message !== '[object Object]') return error.message;
+  return '请求失败';
+}
+function isSpeedupConfirm(error) {
+  return Boolean(error && error.detail && error.detail.code === 'speedup_confirm');
+}
+class ApiError extends Error {
+  constructor(detail, status) {
+    super(detailMessage(detail, status));
+    this.name = 'ApiError';
+    this.status = status;
+    this.detail = detail;
+  }
+}
 async function api(path, options = {}) {
   const response = await fetch(path, {...options, headers: {'Content-Type': 'application/json', ...options.headers}});
   if (response.status === 401 && !$('login-dialog').open) $('login-dialog').showModal();
   const data = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    const detail = Array.isArray(data.detail) ? data.detail.map(x => `${x.loc?.at(-1) || ''}：${x.msg}`).join('；') : data.detail;
-    throw new Error(detail || `请求失败（${response.status}）`);
-  }
+  if (!response.ok) throw new ApiError(data.detail, response.status);
   return data;
 }
-function body() {
+function body(extra = {}) {
   return {title: $('title').value.trim(), owner: $('owner').value.trim(), script: $('script').value.trim(),
     template: document.querySelector('[name=template]:checked').value, ratio: $('ratio').value,
     selection: $('selection').value, narration: $('narration').value,
     tts_speaker: $('narration').value === 'none' ? 'zh_female_vv_uranus_bigtts' : ($('tts-voice').value === 'custom' ? $('tts-speaker').value.trim() : $('tts-voice').value),
     tts_speed: Number($('tts-speed').value), bgm_volume: Number($('volume').value) / 100,
-    allow_cloud_analysis: $('allow-cloud').checked};
+    allow_cloud_analysis: $('allow-cloud').checked, allow_speedup: false, ...extra};
+}
+function confirmSpeedup(detail) {
+  return new Promise(resolve => {
+    const dialog = $('speedup-dialog');
+    if (!dialog || !$('speedup-confirm') || !$('speedup-cancel')) {
+      resolve(window.confirm(detailMessage(detail, 409) + '\n\n确认加速并继续制作？'));
+      return;
+    }
+    let settled = false;
+    $('speedup-message').textContent = detail.message || '素材偏短，需要加快字幕/口播语速后才能更好匹配画面。';
+    $('speedup-facts').innerHTML = [
+      `文案约 ${Number(detail.estimated_seconds || 0).toFixed(1)} 秒`,
+      `素材约 ${Number(detail.material_seconds || 0).toFixed(1)} 秒`,
+      `将提速至 ${detail.speed || '—'} 倍`,
+      detail.still_loops ? '提速后若仍不够，会少量重复画面' : '提速后可覆盖素材时长'
+    ].map(line => `<li>${esc(line)}</li>`).join('');
+    const finish = (ok) => {
+      if (settled) return;
+      settled = true;
+      $('speedup-confirm').onclick = null;
+      $('speedup-cancel').onclick = null;
+      dialog.onclose = null;
+      if (dialog.open) dialog.close();
+      resolve(ok);
+    };
+    $('speedup-confirm').onclick = () => finish(true);
+    $('speedup-cancel').onclick = () => finish(false);
+    dialog.onclose = () => finish(false);
+    if (!dialog.open) dialog.showModal();
+  });
 }
 function updateCreationSummary() {
   const template = document.querySelector('[name=template]:checked').value;
@@ -243,7 +293,7 @@ $('job-form').addEventListener('submit', async e => {
   e.preventDefault(); if (state.busy) return;
   formError('');
   if (!state.revision && (!state.videos.length || !state.music)) return formError('请至少添加一段视频和一首背景音乐。');
-  const request = body();
+  let request = body();
   if (request.selection === 'ai' && !request.allow_cloud_analysis) return formError('使用 AI 选片前，请勾选关键帧分析授权。');
   const total = state.videos.reduce((n,f) => n + f.size, 0) + (state.music?.size || 0);
   if (!state.revision && total > 4 * 1024 ** 3) return formError('每个任务素材总大小最多 4GB。');
@@ -254,16 +304,48 @@ $('job-form').addEventListener('submit', async e => {
   controls.forEach(el => el.disabled = true);
   $('submit').textContent = '正在提交…';
   let created = null;
+  let keepUpload = false;
   try {
     if (state.revision) {
-      await api(`/api/jobs/${state.revision.id}/revisions`, {method:'POST', body:JSON.stringify({request})});
+      try {
+        await api(`/api/jobs/${state.revision.id}/revisions`, {method:'POST', body:JSON.stringify({request})});
+      } catch (error) {
+        if (isSpeedupConfirm(error)) {
+          controls.forEach((el,i) => el.disabled = disabledBefore[i]);
+          $('job-form').classList.remove('busy');
+          const ok = await confirmSpeedup(error.detail);
+          $('job-form').classList.add('busy');
+          controls.forEach(el => el.disabled = true);
+          if (!ok) { formError('已取消提交。可缩短文案、补充素材后再试。'); return; }
+          request = body({allow_speedup: true});
+          await api(`/api/jobs/${state.revision.id}/revisions`, {method:'POST', body:JSON.stringify({request})});
+        } else throw error;
+      }
     } else {
       created = await api('/api/jobs', {method:'POST', body:JSON.stringify(request)});
       $('upload-progress').hidden = false; $('upload-bar').value = 0; $('upload-percent').textContent = '0%';
       let completed = 0;
       for (const file of state.videos) completed += await uploadFile(created, file, 'video', completed, total);
       await uploadFile(created, state.music, 'bgm', completed, total);
-      await api(`/api/jobs/${created.id}/submit`, {method:'POST'});
+      try {
+        await api(`/api/jobs/${created.id}/submit`, {method:'POST', body:JSON.stringify({})});
+      } catch (error) {
+        if (isSpeedupConfirm(error)) {
+          controls.forEach((el,i) => el.disabled = disabledBefore[i]);
+          $('job-form').classList.remove('busy');
+          const ok = await confirmSpeedup(error.detail);
+          $('job-form').classList.add('busy');
+          controls.forEach(el => el.disabled = true);
+          if (!ok) {
+            formError('已取消提交。可缩短文案、补充素材后再试。');
+            await api(`/api/jobs/${created.id}/cancel`, {method:'POST'}).catch(() => {});
+            created = null;
+            return;
+          }
+          keepUpload = true;
+          await api(`/api/jobs/${created.id}/submit`, {method:'POST', body:JSON.stringify({allow_speedup: true})});
+        } else throw error;
+      }
     }
     savePreferences();
     toast('任务已提交，制作完成后可在右侧领取。');
@@ -272,8 +354,8 @@ $('job-form').addEventListener('submit', async e => {
     updateCreationSummary();
     await refresh();
   } catch (error) {
-    if (created) await api(`/api/jobs/${created.id}/cancel`, {method:'POST'}).catch(() => {});
-    formError(`${error.message}。表单和所选文件已保留，可重新提交。`);
+    if (created && !keepUpload) await api(`/api/jobs/${created.id}/cancel`, {method:'POST'}).catch(() => {});
+    formError(`${errorMessage(error)}。表单和所选文件已保留，可重新提交。`);
   } finally {
     state.busy = false; $('job-form').classList.remove('busy'); controls.forEach((el,i) => el.disabled = disabledBefore[i]);
     $('submit').textContent = state.revision ? '生成新版本 ↗' : '开始制作 ↗'; $('upload-progress').hidden = true;

@@ -117,10 +117,15 @@ STYLES = {
 }
 
 
-def caption_plan(cues, font, width, height, template='new'):
+def caption_plan(cues, font, width, height, template='new', speed=1.0):
     skill = skill_module('delivery_steps')
     style = STYLES[template]
     size, lexicon = style['fontSize'], KEYWORDS + style['extra']
+    rate = max(0.5, min(2.0, float(speed) or 1.0))
+    # Default 0.5s intro/outro + 0.3s dwell scale with speech/subtitle speed.
+    anim = round(0.5 / rate, 4)
+    dwell = round(0.3 / rate, 4)
+    floor = anim + anim + dwell
     caps = []
     for i, cue in enumerate(cues):
         # Native finish wraps with line_max_width. Do not insert \n here:
@@ -134,7 +139,7 @@ def caption_plan(cues, font, width, height, template='new'):
         caps.append({'cue_ids':[cue['id']], 'text':shown, 'start':cue['start'], 'end':round(cue['start']+cue['duration'],6),
                      'recipe':'cta-lockup' if action else 'keyword-reveal' if benefit else 'editorial-stack',
                      'visual':{'fontSize':size, 'font':{'path':font['path'],'id':font['id']}, 'color':'#FFFFFF', 'x':0, 'y':style['y']},
-                     'animation':{'intro':intro,'outro':'波浪弹出','intro_seconds':.5,'outro_seconds':.5,'purpose':purpose},
+                     'animation':{'intro':intro,'outro':'波浪弹出','intro_seconds':anim,'outro_seconds':anim,'purpose':purpose},
                      'keywords':words})
     if caps and not any(c['keywords'] for c in caps):
         token = caps[0]['text'][:2]
@@ -156,8 +161,9 @@ def caption_plan(cues, font, width, height, template='new'):
             measured = ImageFont.truetype(font['path'], round(bubble_px)).getlength(label)
             cap['bubble'] = {'text':label, 'x':0, 'y':style['bubble_y'], 'width':min(.85,(measured+30)/(width*.5)),
                              'height':(bubble_px+18)/(height*.5), 'color':style['bubble_color']}
-    if not caps or any(c['end']-c['start'] < 1.3-1e-6 for c in caps):
-        raise ProductionError('文案过短，无法容纳各 0.5 秒的字幕进出场及阅读停留；请补充文案。')
+    if not caps or any(c['end']-c['start'] < floor - 1e-6 for c in caps):
+        raise ProductionError(
+            f'文案过短，无法容纳各 {anim:g} 秒的字幕进出场及阅读停留；请补充文案。')
     return caps
 
 
@@ -175,7 +181,7 @@ def compile_and_finish(settings, folder, build, spec, plan, resources, log):
         raise ProductionError(str(exc) or '字幕样式未通过 skill 检查。') from None
     # This is a new, real compilation. The skill records argv/stdout/returncode;
     # no historical logs are synthesized and no failed gate is marked passed.
-    arguments = ['compile', str(root/'compile.json'), '--out', str(root/'draft'), '--template', 'bundled']
+    arguments = ['compile', str(root/'compile.json'), '--out', str(root/'draft')]
     completed = run([*settings.capcut, *arguments], log=log, check=False)
     skill.write(root/'compile-result.json', {
         'argv': ['capcut', *arguments], 'executed_argv': [*settings.capcut, *arguments],

@@ -14,6 +14,7 @@ class JobRequest(BaseModel):
     tts_speed: float = Field(default=1.0, ge=0.5, le=2.0)
     bgm_volume: float = Field(default=0.35, ge=0, le=1)
     allow_cloud_analysis: bool = False
+    allow_speedup: bool = False
 
     @field_validator('title', 'owner', 'script')
     @classmethod
@@ -37,6 +38,10 @@ class SpeechPreviewRequest(BaseModel):
 
 class RevisionRequest(BaseModel):
     request: JobRequest
+
+
+class SubmitRequest(BaseModel):
+    allow_speedup: bool = False
 
 
 class LoginRequest(BaseModel):

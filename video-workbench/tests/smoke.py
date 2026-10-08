@@ -9,6 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from workbench.config import ROOT, Settings
 from workbench.media import probe, run
 from workbench.models import JobRequest
+from workbench.packaging import MAC_IMPORT_NAME, WINDOWS_IMPORT_NAME
 from workbench.store import Store
 from workbench.worker import Worker
 
@@ -37,9 +38,9 @@ result = store.get(job['id'])
 assert result['status'] == 'ready', result
 with zipfile.ZipFile(folder/'draft.zip') as archive:
     assert not archive.testzip()
-    assert 'Import-Draft.ps1' in archive.namelist()
-    assert 'Import-Draft.command' in archive.namelist()
-    assert archive.getinfo('Import-Draft.command').external_attr >> 16 & 0o777 == 0o755
+    assert WINDOWS_IMPORT_NAME in archive.namelist()
+    assert MAC_IMPORT_NAME in archive.namelist()
+    assert archive.getinfo(MAC_IMPORT_NAME).external_attr >> 16 & 0o777 == 0o755
     manifest = json.loads(archive.read('manifest.json'))
     assert manifest['native_verified'] is False
     content = json.loads(archive.read('draft/draft_content.json'))

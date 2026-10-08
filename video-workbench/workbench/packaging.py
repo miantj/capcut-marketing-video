@@ -8,6 +8,9 @@ from pathlib import Path
 from .config import ROOT
 from .media import ProductionError
 
+MAC_IMPORT_NAME = '点击导入草稿文件-Mac.command'
+WINDOWS_IMPORT_NAME = '点击导入草稿文件-Windows.ps1'
+
 
 def walk_strings(value):
     if isinstance(value, dict):
@@ -72,7 +75,7 @@ def path_roots(draft, store):
 
 
 def write_zip_member(archive, file, arcname):
-    if arcname != 'Import-Draft.command':
+    if arcname != MAC_IMPORT_NAME:
         archive.write(file, arcname)
         return
     info = zipfile.ZipInfo(arcname)
@@ -138,19 +141,19 @@ def package_draft(draft, destination, title, duration):
             target.write_text(json.dumps(replace_paths(document, draft, draft.parent), ensure_ascii=False), 'utf-8')
         else:
             shutil.copy2(file, target)
-    shutil.copy2(ROOT / 'scripts/Import-Draft.ps1', stage / 'Import-Draft.ps1')
-    command = stage / 'Import-Draft.command'
+    shutil.copy2(ROOT / 'scripts/Import-Draft.ps1', stage / WINDOWS_IMPORT_NAME)
+    command = stage / MAC_IMPORT_NAME
     shutil.copy2(ROOT / 'scripts/Import-Draft.command', command)
     command.chmod(0o755)
     (stage / '使用说明.txt').write_text(
         f'{title}\n\n1. 将 ZIP 完整解压到本机文件夹（不要直接在压缩包中运行）。\n'
         '2. 保存并退出剪映。\n'
-        '   Mac：双击 Import-Draft.command。若提示无法打开，右键该文件选择打开。\n'
-        '   Windows：双击 Import-Draft.ps1。窗口会停住显示结果，看完再关闭。\n'
+        f'   Mac：双击 {MAC_IMPORT_NAME}。若提示无法打开，右键该文件选择打开。\n'
+        f'   Windows：双击 {WINDOWS_IMPORT_NAME}。窗口会停住显示结果，看完再关闭。\n'
         '   若提示已经导入，直接打开剪映查找草稿即可。\n'
         '3. 重新打开剪映，在首页查找草稿。字幕、镜头和音乐分别可编辑。\n'
-        '自定义草稿库：Mac 执行 ./Import-Draft.command --store \'路径\'；'
-        'Windows 执行 .\\Import-Draft.ps1 -Store \'路径\'。\n'
+        f'自定义草稿库：Mac 执行 ./{MAC_IMPORT_NAME} --store \'路径\'；'
+        f'Windows 执行 .\\{WINDOWS_IMPORT_NAME} -Store \'路径\'。\n'
         '如果电脑策略禁止运行脚本，请联系管理员，不要自行关闭安全策略。\n\n'
         '兼容范围：Windows / macOS 剪映桌面版一键导入。\n'
         '页面视频为近似预览，字体、动画和布局可能与剪映不同；正式使用前请在剪映检查并导出。\n'

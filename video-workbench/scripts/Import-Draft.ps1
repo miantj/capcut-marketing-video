@@ -59,7 +59,7 @@ try {
     $sourceDraft = Join-Path $packageRoot 'draft'
     $manifestPath = Join-Path $packageRoot 'manifest.json'
     $utf8 = New-Object System.Text.UTF8Encoding($false)
-    if (-not (Test-Path -LiteralPath $manifestPath)) { throw '请先把 ZIP 完整解压到文件夹，再运行 Import-Draft.ps1。' }
+    if (-not (Test-Path -LiteralPath $manifestPath)) { throw '请先把 ZIP 完整解压到文件夹，再运行“点击导入草稿文件-Windows.ps1”。' }
     $manifest = Get-Content -LiteralPath $manifestPath -Raw -Encoding UTF8 | ConvertFrom-Json
     if (-not $Store) { $Store = Join-Path $env:LOCALAPPDATA 'JianyingPro\User Data\Projects\com.lveditor.draft' }
     $Store = [IO.Path]::GetFullPath($Store)
@@ -85,7 +85,7 @@ try {
         if (-not (Test-Path -LiteralPath $resourcePath)) { throw "剪映缺少资源：$($resource.name)。请先在剪映中下载该字体或文字动画，再重试。" }
     }
     foreach ($entry in $manifest.files.PSObject.Properties) {
-        if ($entry.Name -in @('Import-Draft.ps1', 'Import-Draft.command', '使用说明.txt')) { continue }
+        if ($entry.Name -in @('点击导入草稿文件-Windows.ps1', '点击导入草稿文件-Mac.command', '点击导入草稿文件.ps1', '点击导入草稿文件.command', 'Import-Draft.ps1', 'Import-Draft.command', '使用说明.txt')) { continue }
         $relative = $entry.Name.Replace('/', [IO.Path]::DirectorySeparatorChar)
         $itemPath = [IO.Path]::GetFullPath([IO.Path]::Combine($packageRoot, $relative))
         if (-not $itemPath.StartsWith($packageRoot + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {

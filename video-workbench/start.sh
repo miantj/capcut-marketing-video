@@ -19,10 +19,20 @@ if [ -z "$PYTHON" ]; then
   if [ ! -x .venv/bin/python ] || ! .venv/bin/python -c "import sys; raise SystemExit(0 if sys.version_info >= (3, 11) else 1)"; then
     "$bootstrap_py" -m venv .venv
   fi
-  PYTHON=.venv/bin/python
-  "$PYTHON" -c "import uvicorn" 2>/dev/null || "$PYTHON" -m pip install -r requirements.txt
+  if .venv/bin/python -c "import fastapi, uvicorn, PIL" 2>/dev/null; then
+    PYTHON=.venv/bin/python
+  elif "$bootstrap_py" -c "import fastapi, uvicorn, PIL" 2>/dev/null; then
+    echo "Using system Python packages; the local venv is incomplete." >&2
+    PYTHON="$bootstrap_py"
+  else
+    PYTHON=.venv/bin/python
+    "$PYTHON" -m pip install -r requirements.txt || {
+      echo "Python dependencies are unavailable and could not be downloaded. Install requirements.txt or configure an accessible package index." >&2
+      exit 1
+    }
+  fi
 fi
-if [ ! -f node_modules/capcut-cli/dist/index.js ]; then
+if [ ! -f node_modules/capcut-cli/dist/index.js ] && ! command -v capcut >/dev/null 2>&1; then
   command -v npm >/dev/null 2>&1 || { echo "Need npm to install capcut-cli." >&2; exit 1; }
   npm install capcut-cli
 fi

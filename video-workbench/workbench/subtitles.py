@@ -74,13 +74,20 @@ def write_ass(document, width, height, target):
             scale_y = 100 * clip_scale.get('y', 1)
             milliseconds = round((end-start)*1000)
             animations = [a for ref in segment.get('extra_material_refs',[]) for a in materials.get(ref,{}).get('animations',[])]
-            intro = next((a['name'] for a in animations if a.get('type') == 'in'), '放大')
+            intro = next((a for a in animations if a.get('type') == 'in'), None)
+            outro = next((a for a in animations if a.get('type') == 'out'), None)
+            intro_name = (intro or {}).get('name') or '放大'
+            # Draft stores animation duration in microseconds; fall back to 0.5s.
+            intro_ms = max(1, round(((intro or {}).get('duration') or 500_000) / 1000))
+            outro_ms = max(1, round(((outro or {}).get('duration') or 500_000) / 1000))
             # Font, text, positions, colors and timing come from the actual draft.
             # Native animation presets are approximated, never called native rendering.
-            if intro == '波浪弹入':
-                enter = '\\fscx88\\fscy88\\t(0,300,\\fscx106\\fscy106)\\t(300,500,\\fscx100\\fscy100)'
+            if intro_name == '波浪弹入':
+                mid = max(1, round(intro_ms * 0.6))
+                enter = (f'\\fscx88\\fscy88\\t(0,{mid},\\fscx106\\fscy106)'
+                         f'\\t({mid},{intro_ms},\\fscx100\\fscy100)')
             else:
-                enter = '\\fscx85\\fscy85\\t(0,500,\\fscx100\\fscy100)'
+                enter = f'\\fscx85\\fscy85\\t(0,{intro_ms},\\fscx100\\fscy100)'
             # Apply native static scale throughout the approximate animation,
             # including its settled state and exit, instead of resetting to 100%.
             enter = re.sub(r'\\fsc([xy])(\d+)',
@@ -88,7 +95,9 @@ def write_ass(document, width, height, target):
             line_max = material.get('line_max_width')
             max_width = width * line_max if isinstance(line_max, (int, float)) and line_max > 0 else width * 0.926
             styled = rich_text(content, font_path=font_path, pixels=pixels, max_width=max_width)
-            tags = f'{{\\an5\\pos({x},{y})\\fs{pixels:g}\\fad(500,500){enter}\\t({milliseconds-500},{milliseconds},\\fscx{scale_x*.9:g}\\fscy{scale_y*.9:g})}}'
+            exit_start = max(0, milliseconds - outro_ms)
+            tags = (f'{{\\an5\\pos({x},{y})\\fs{pixels:g}\\fad({intro_ms},{outro_ms}){enter}'
+                    f'\\t({exit_start},{milliseconds},\\fscx{scale_x*.9:g}\\fscy{scale_y*.9:g})}}')
             if track.get('name') == '气泡':
                 bubble_count += 1
                 bw, bh = material.get('background_width'), material.get('background_height')
@@ -108,12 +117,12 @@ def write_ass(document, width, height, target):
                            f'l {left} {top+radius} b {left} {top} {left} {top} {left+radius} {top}')
                 hex_color = str(material.get('background_color') or '#FFE263').removeprefix('#')
                 fill = f'&H{hex_color[4:6]}{hex_color[2:4]}{hex_color[0:2]}&' if len(hex_color) == 6 else '&H63E2FF&'
-                rows.append(f'Dialogue: 1,{stamp(start)},{stamp(end)},Body,,0,0,0,,{{\\an7\\pos(0,0)\\p1\\bord0\\shad0\\c{fill}\\fad(500,500)}}{drawing}{{\\p0}}')
-                tags = f'{{\\an5\\pos({x},{y})\\fs{pixels:g}\\fscx{scale_x:g}\\fscy{scale_y:g}\\bord0\\shad0\\fad(500,500)}}'
+                rows.append(f'Dialogue: 1,{stamp(start)},{stamp(end)},Body,,0,0,0,,{{\\an7\\pos(0,0)\\p1\\bord0\\shad0\\c{fill}\\fad({intro_ms},{outro_ms})}}{drawing}{{\\p0}}')
+                tags = f'{{\\an5\\pos({x},{y})\\fs{pixels:g}\\fscx{scale_x:g}\\fscy{scale_y:g}\\bord0\\shad0\\fad({intro_ms},{outro_ms})}}'
                 styled = rich_text(content)
             rows.append(f'Dialogue: 2,{stamp(start)},{stamp(end)},Body,,0,0,0,,{tags}{styled}')
             count += 1
     target.write_text('\n'.join(rows)+'\n','utf-8-sig')
     return {'textOverlays':count,'bubbleOverlays':bubble_count,'font_paths':sorted(font_paths),
             'font_size_mode': 'calibrated: 悠然体 font_size * canvas_h / 320',
-            'animation_mode':'approximate native presets; 0.5s intro/outro', 'captionFont':'HYYouRanTiJ'}
+            'animation_mode':'approximate native presets; intro/outro from draft durations', 'captionFont':'HYYouRanTiJ'}

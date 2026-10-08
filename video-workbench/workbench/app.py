@@ -15,15 +15,37 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from .config import ROOT, Settings
-from .models import FileRequest, JobRequest, LoginRequest, RevisionRequest, SpeechPreviewRequest
+from .models import FileRequest, JobRequest, LoginRequest, RevisionRequest, SpeechPreviewRequest, SubmitRequest
 from .tts import synthesize
-from .media import ProductionError
+from .media import ProductionError, probe, speedup_preview
 from .store import Store
 from .worker import Worker
 from .speech_cache import inherit_speech_cache
 
 VIDEO_EXT = {'.mp4', '.mov', '.m4v', '.webm'}
 AUDIO_EXT = {'.mp3', '.wav', '.m4a', '.aac', '.ogg', '.flac'}
+
+
+def material_speedup(settings, job_dir, files, request):
+    """Probe uploaded videos; return speedup plan or None if media cannot be measured yet."""
+    if not settings.ffmpeg:
+        return None
+    total, counted = 0., 0
+    for item in files:
+        if item.get('role') != 'video':
+            continue
+        path = job_dir / item['path']
+        if not path.is_file():
+            return None
+        try:
+            total += probe(settings.ffmpeg, path)['duration']
+            counted += 1
+        except ProductionError:
+            return None
+    if not counted or total <= 0:
+        return None
+    return speedup_preview(request['script'], total, narration=request.get('narration', 'none'),
+                           base_speed=request.get('tts_speed', 1.0))
 
 
 def create_app(settings=None, start_worker=True):
@@ -220,7 +242,8 @@ def create_app(settings=None, start_worker=True):
             return {'id': file_id, 'received': offset + total}
 
     @app.post('/api/jobs/{job_id}/submit')
-    def submit(job_id: str):
+    def submit(job_id: str, body: SubmitRequest | None = None):
+        body = body or SubmitRequest()
         with mutation_lock:
             job = get_job(job_id)
             if job['status'] != 'uploading':
@@ -230,6 +253,12 @@ def create_app(settings=None, start_worker=True):
                 raise HTTPException(422, '请上传视频素材和一首背景音乐')
             if any(f['received'] != f['size'] for f in job['files']):
                 raise HTTPException(409, '素材尚未上传完成')
+            request = dict(job['request'])
+            if body.allow_speedup:
+                request = store.patch_request(job_id, allow_speedup=True) or {**request, 'allow_speedup': True}
+            plan = material_speedup(settings, settings.data / 'jobs' / job_id, job['files'], request)
+            if plan and plan['needed'] and not request.get('allow_speedup'):
+                raise HTTPException(409, {'code': 'speedup_confirm', **plan})
             store.update(job_id, 'queued', '排队中', 0)
         worker.wake.set()
         return public(get_job(job_id))
@@ -267,13 +296,17 @@ def create_app(settings=None, start_worker=True):
             if ('video' not in roles or roles.count('bgm') != 1
                     or any(f['received'] != f['size'] for f in old['files'])):
                 raise HTTPException(409, '原版本素材不完整，请重新上传')
+            request = body.request.model_dump()
+            plan = material_speedup(settings, settings.data / 'jobs' / job_id, old['files'], request)
+            if plan and plan['needed'] and not request.get('allow_speedup'):
+                raise HTTPException(409, {'code': 'speedup_confirm', **plan})
             with store.db() as db:
                 active = db.execute("SELECT COUNT(*) FROM jobs WHERE status IN ('uploading','queued','processing')").fetchone()[0]
             if active >= 20:
                 raise HTTPException(429, '当前任务较多，请稍后提交')
             if shutil.disk_usage(settings.data).free < settings.min_free + sum(f['size'] for f in old['files']):
                 raise HTTPException(507, '磁盘空间不足以创建新版本')
-            new = store.create(body.request.model_dump(), old['id'], old['revision'] + 1)
+            new = store.create(request, old['id'], old['revision'] + 1)
             try:
                 for item in old['files']:
                     file_id = uuid.uuid4().hex
@@ -284,7 +317,7 @@ def create_app(settings=None, start_worker=True):
                                    (file_id, new['id'], item['name'], item['role'], item['size'], item['size'], relative))
                 inherit_speech_cache(old, settings.data / 'jobs' / job_id,
                                      settings.data / 'jobs' / new['id'],
-                                     body.request.model_dump(), settings.tts_resource)
+                                     request, settings.tts_resource)
                 store.update(new['id'], 'queued', '新版本排队中', 0)
             except Exception:
                 store.update(new['id'], 'needs_attention', '复制原素材失败', 0, error='请重新上传素材。')

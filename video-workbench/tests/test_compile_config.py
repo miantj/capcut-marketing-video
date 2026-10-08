@@ -23,6 +23,7 @@ class CompileConfigTests(unittest.TestCase):
                 with self.assertRaises(ProductionError):
                     compile_and_finish(settings, folder, build, {}, {}, folder/'resources.json', folder/'log')
             self.assertEqual(run.call_args.args[0][:3], ['custom-node', 'custom-cli.js', 'compile'])
+            self.assertNotIn('--template', run.call_args.args[0])
             evidence = skill.write.call_args.args[1]
             self.assertEqual(evidence['returncode'], 1)
             self.assertEqual(evidence['executed_argv'][:2], settings.capcut)

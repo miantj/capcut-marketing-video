@@ -1,5 +1,6 @@
 import json
 import os
+import sqlite3
 import shutil
 import socket
 import sys
@@ -17,9 +18,11 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from workbench.config import Settings, resolve_capcut, resolve_ffmpeg
 from workbench.compat import repair_material_durations
-from workbench.media import ProductionError, failed_tool_message, ordered_shots, script_cues, validate_shots, probe
+from workbench.media import (ProductionError, failed_tool_message, fit_cues_to_media, media_fit_speed,
+                             ordered_shots, script_cues, validate_shots, probe)
 from workbench.packaging import replace_paths
 from workbench.store import Store
+from workbench.worker import Worker
 
 
 class PlanningTests(unittest.TestCase):
@@ -60,6 +63,38 @@ class PlanningTests(unittest.TestCase):
         shots = ordered_shots(cues, videos)
         validate_shots(shots, videos, sum(c['duration'] for c in cues))
         self.assertGreater(len(shots), 2)
+
+    def test_fit_cues_speeds_up_before_looping(self):
+        cues = [{'id': 'S001', 'text': '甲', 'start': 0., 'duration': 10.},
+                {'id': 'S002', 'text': '乙', 'start': 10., 'duration': 10.}]
+        fitted, duration, speed, changed = fit_cues_to_media(cues, 10., max_speed=2.0)
+        self.assertTrue(changed)
+        self.assertEqual(speed, 2.0)
+        self.assertAlmostEqual(duration, 10.)
+        self.assertAlmostEqual(fitted[0]['duration'], 5.)
+        self.assertAlmostEqual(fitted[1]['start'], 5.)
+        # Still longer after 2× → caller may loop media.
+        fitted, duration, speed, changed = fit_cues_to_media(cues, 5., max_speed=2.0)
+        self.assertEqual(speed, 2.0)
+        self.assertAlmostEqual(duration, 10.)
+        self.assertGreater(duration, 5.)
+
+    def test_media_fit_speed_respects_base_and_cap(self):
+        self.assertEqual(media_fit_speed(10, 20, base_speed=1.0), (1.0, False))
+        self.assertEqual(media_fit_speed(20, 10, base_speed=1.0), (2.0, True))
+        self.assertEqual(media_fit_speed(30, 10, base_speed=1.0), (2.0, True))
+        self.assertEqual(media_fit_speed(12, 10, base_speed=1.5), (1.5, False))
+        self.assertEqual(media_fit_speed(20, 10, base_speed=1.5), (2.0, True))
+
+    def test_speedup_preview_marks_confirmation(self):
+        from workbench.media import speedup_preview
+        plan = speedup_preview('测' * 100, 5.0, narration='none', base_speed=1.0)
+        self.assertTrue(plan['needed'])
+        self.assertEqual(plan['speed'], 2.0)
+        self.assertEqual(plan['anim_seconds'], 0.25)
+        self.assertTrue(plan['still_loops'])
+        ok = speedup_preview('短文案。', 30.0, narration='none')
+        self.assertFalse(ok['needed'])
 
     def test_rejects_bad_ai_plan(self):
         for shot in ({'asset_id':'other','start':0,'duration':1,'source_in':0},
@@ -164,6 +199,30 @@ class QueueTests(unittest.TestCase):
             store.recover()
             self.assertEqual(store.get(job['id'])['status'], 'needs_attention')
 
+    def test_worker_retries_queue_database_errors(self):
+        class Wake:
+            def __init__(self, worker):
+                self.worker, self.waits = worker, 0
+
+            def wait(self, timeout):
+                self.waits += 1
+                self.worker.stop_event.set()
+
+            def clear(self):
+                pass
+
+        class BrokenStore:
+            path = 'queue.sqlite3'
+
+            def claim(self):
+                raise sqlite3.OperationalError('unable to open database file')
+
+        worker = Worker(SimpleNamespace(data=Path('.')), BrokenStore())
+        worker.wake = Wake(worker)
+        with self.assertLogs('workbench.worker', level='ERROR'):
+            worker.loop()
+        self.assertEqual(worker.wake.waits, 1)
+
 
 class ApiTests(unittest.TestCase):
     @classmethod
@@ -208,7 +267,7 @@ class ApiTests(unittest.TestCase):
             return response.status, result
 
     def new_job(self, **kwargs):
-        payload = dict(title='Test', owner='Tester', script='原始文案。', **kwargs)
+        payload = {'title': 'Test', 'owner': 'Tester', 'script': '原始文案。', **kwargs}
         status, job = self.call('/api/jobs','POST',payload)
         self.assertEqual(status, 201)
         return job
@@ -290,6 +349,26 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(self.call(base)[1]['request']['script'],'原始文案。')
         self.assertEqual(self.call('/api/jobs/' + revised['id'] + '/cancel','POST')[1]['status'],'cancelled')
         self.assertEqual(self.call('/api/jobs/' + revised['id'] + '/cancel','POST')[0],409)
+
+    def test_submit_asks_speedup_confirmation(self):
+        job = self.new_job(script='测' * 120, narration='none')
+        base = '/api/jobs/' + job['id']
+        for role, ext in [('video', 'mp4'), ('bgm', 'mp3')]:
+            _, file = self.call(base + '/files', 'POST', {'name': 'test.' + ext, 'role': role, 'size': 3})
+            self.call(base + '/files/' + file['id'], 'PUT', raw=b'abc')
+        plan = {'needed': True, 'speed': 2.0, 'anim_seconds': 0.25, 'estimated_seconds': 26.4,
+                'material_seconds': 8.0, 'fitted_seconds': 13.2, 'still_loops': True,
+                'base_speed': 1.0, 'message': '需要加速'}
+        with patch('workbench.app.material_speedup', return_value=plan):
+            code, detail = self.call(base + '/submit', 'POST', {})
+        self.assertEqual(code, 409)
+        self.assertEqual(detail['detail']['code'], 'speedup_confirm')
+        self.assertEqual(self.call(base)[1]['status'], 'uploading')
+        with patch('workbench.app.material_speedup', return_value=plan):
+            code, queued = self.call(base + '/submit', 'POST', {'allow_speedup': True})
+        self.assertEqual(code, 200)
+        self.assertEqual(queued['status'], 'queued')
+        self.assertTrue(self.call(base)[1]['request']['allow_speedup'])
 
     def test_revision_rejects_cancelled_job_without_music(self):
         job = self.new_job()

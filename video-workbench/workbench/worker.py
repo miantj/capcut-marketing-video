@@ -1,15 +1,20 @@
 import json
+import logging
+import sqlite3
 import threading
 import traceback
 
 from .ai import select_shots
 from .compat import repair_material_durations, render_chinese_preview
-from .media import ProductionError, ordered_shots, probe, run, script_cues, validate_shots, validate_preview
+from .media import (ProductionError, fit_cues_to_media, media_fit_speed, ordered_shots, probe, run,
+                    script_cues, validate_shots, validate_preview)
 from .packaging import package_draft
 from .skill_timing import evidence as timing_evidence
 from .skill_timing import skill_module
 from .caption_style import native_resources, caption_plan, compile_and_finish
 from .tts import optional_narration
+
+log = logging.getLogger(__name__)
 
 
 class Worker:
@@ -30,7 +35,13 @@ class Worker:
 
     def loop(self):
         while not self.stop_event.is_set():
-            job_id = self.store.claim()
+            try:
+                job_id = self.store.claim()
+            except sqlite3.OperationalError:
+                log.exception('video-worker could not open the queue database at %s; retrying', self.store.path)
+                self.wake.wait(2)
+                self.wake.clear()
+                continue
             if job_id:
                 try:
                     self.process(job_id)
@@ -76,8 +87,19 @@ class Worker:
         # Check local dependencies before spending on cloud narration.
         resources, font = native_resources(folder)
         store.update(job_id, 'processing', '文案分句与镜头规划', 20)
+        material_total = sum(v['media']['duration'] for v in videos)
         cues = script_cues(request['script'], limit_estimate=request.get('narration') != 'volcengine')
         speech_cues = script_cues(request['script'], limit_estimate=False, merge_short=False)
+        # Prefer speeding speech/subtitles (max 2×) before looping short media.
+        # Auto bump only after the user confirmed allow_speedup in the UI.
+        allowed = bool(request.get('allow_speedup'))
+        if request.get('narration') == 'volcengine':
+            est = sum(c['duration'] for c in speech_cues)
+            speed, sped = media_fit_speed(est, material_total, base_speed=request['tts_speed'], max_speed=2.0)
+            if sped:
+                if not allowed:
+                    raise ProductionError('素材偏短需要加快语速，请确认后重新提交。')
+                request = {**request, 'tts_speed': speed}
         aligned, narration, fallback = optional_narration(settings, request, speech_cues, folder,
             lambda i, total: store.update(job_id, 'processing', f'检查复用并生成口播 {i+1}/{total}', 21 + int(6*i/total)))
         if narration:
@@ -87,13 +109,29 @@ class Worker:
         if fallback:
             store.update(job_id, 'processing', fallback, 27)
         duration = round(sum(c['duration'] for c in cues), 6)
+        timing_speed = float(request['tts_speed'])
+        fit_note = None
+        if not narration:
+            speed, sped = media_fit_speed(duration, material_total, base_speed=1.0, max_speed=2.0)
+            if sped and not allowed:
+                raise ProductionError('素材偏短需要加快语速，请确认后重新提交。')
+            if sped:
+                cues, duration, timing_speed, fitted = fit_cues_to_media(cues, material_total, max_speed=2.0)
+                if fitted:
+                    fit_note = (f'素材偏短，已将字幕语速提至 {timing_speed:g} 倍，'
+                                f'进出场各 {round(0.5 / timing_speed, 4):g} 秒。')
         if duration > 180:
             raise ProductionError('视频超过 3 分钟，请缩短文案后重试。' + (fallback or ''))
         warnings = ['纯文字与背景音乐版本，未生成配音。', '近似预览不代表剪映原生效果，草稿需在目标电脑打开确认。']
         if narration:
             warnings[0] = '口播由火山引擎 AI 生成，字幕按逐段音频实际时长对齐。'
+            if timing_speed > float(job['request'].get('tts_speed', 1.0)) + 1e-9:
+                fit_note = (f'素材偏短，已将口播语速提至 {timing_speed:g} 倍，'
+                            f'进出场各 {round(0.5 / timing_speed, 4):g} 秒。')
         elif fallback:
             warnings[0] = fallback
+        if fit_note:
+            warnings.append(fit_note)
         if request['selection'] == 'ai':
             store.update(job_id, 'processing', 'AI 查看关键帧并匹配文案', 28)
             inspection = folder / 'inspection'
@@ -105,12 +143,19 @@ class Worker:
             shots = ordered_shots(cues, videos)
             warnings.append('按素材顺序剪辑，未判断画面含义或处理原画面中的旧字幕；请在预览中检查。')
         validate_shots(shots, videos, duration)
-        if duration > sum(v['media']['duration'] for v in videos):
-            warnings.append('文案时长超过视频素材总长，部分素材重复使用。')
+        if duration > material_total:
+            if timing_speed >= 2.0 - 1e-9:
+                warnings.append('已提至最大 2 倍语速仍超过素材总长，部分素材重复使用。')
+            else:
+                warnings.append('文案时长仍超过视频素材总长，部分素材重复使用。')
         timing = timing_evidence(request['script'])
+        timing['speed'] = timing_speed
+        if fit_note:
+            timing['fit_to_media'] = True
         if narration:
             timing = {'timing': 'aligned', 'source': 'volcengine', 'speech_aligned': True,
-                      'method': 'decoded_pcm_samples', 'alignment': 'segment', 'speed': request['tts_speed']}
+                      'method': 'decoded_pcm_samples', 'alignment': 'segment', 'speed': timing_speed,
+                      'fit_to_media': bool(fit_note)}
         plan = {'mode': request['selection'], 'source_text': request['script'], 'cues': cues,
                 'shots': shots, 'duration': duration, 'timing_basis': timing, 'warnings': warnings}
         plan['narration'] = [{k: v for k, v in item.items() if k != 'path'} for item in narration]
@@ -120,7 +165,8 @@ class Worker:
         video_items = [{'ref': f'v{i}', 'path': lookup[s['asset_id']]['path'], 'start': s['start'], 'duration': s['duration'],
                         'sourceStart': s['source_in'], 'volume': 0, 'width': lookup[s['asset_id']]['media']['width'],
                         'height': lookup[s['asset_id']]['media']['height']} for i, s in enumerate(shots)]
-        captions = caption_plan(cues, font, width, height, request['template'])
+        captions = caption_plan(cues, font, width, height, request['template'], speed=timing_speed)
+        anim_seconds = captions[0]['animation']['intro_seconds'] if captions else round(0.5 / max(timing_speed, 0.5), 4)
         caption_items = []
         for i, cap in enumerate(captions):
             caption_items.append({'ref': f'caption-{i}', 'text': cap['text'], 'start': cap['start'], 'duration': cap['end']-cap['start'],
@@ -145,6 +191,9 @@ class Worker:
                       'canvas':{'width':width,'height':height,'fps':30}, 'captions':captions,
                       'narration':{'mode':'volcengine' if narration else 'none','timing':timing['timing']},
                       'audio':[{'start':a['start'],'end':a['start']+a['duration'],'volume':a['volume']} for a in audio]}
+        if abs(anim_seconds - 0.5) > 1e-9:
+            style_plan['style_exceptions'] = {
+                'animation_reason': f'素材偏短，字幕/口播 {timing_speed:g} 倍语速，进出场按同比例各 {anim_seconds:g} 秒'}
         draft, style_root = compile_and_finish(settings, folder, build, spec, style_plan, resources, log)
         repair_material_durations(draft, settings, log)
         run([*settings.capcut, 'register', draft, '--materials', '--drafts', draft.parent, '--apply', '--force-write'], log=log)
@@ -167,7 +216,8 @@ class Worker:
         manifest = package_draft(draft, folder / 'draft.zip', request['title'], duration)
         result = {'duration': duration, 'draft_name': name, 'draft_id': manifest['draft_id'],
                   'timing_basis': timing,
-                  'caption_style':{'font':font['family'],'intro_seconds':.5,'outro_seconds':.5,
+                  'caption_style':{'font':font['family'],'intro_seconds':anim_seconds,'outro_seconds':anim_seconds,
+                                   'speed': timing_speed,
                                    'keyword_screens':sum(bool(c.get('keywords')) for c in captions),
                                    'bubbles':sum(bool(c.get('bubble')) for c in captions), 'skill_style_check':checked['ok']},
                   'preview_mode': 'approximate', 'native_verified': False, 'selection': request['selection'],
@@ -175,7 +225,7 @@ class Worker:
                   'package_bytes': (folder / 'draft.zip').stat().st_size, 'shot_count': len(shots), 'caption_count': len(cues)}
         if narration:
             result['files'].append('narration.wav')
-            result['narration'] = {'provider': 'volcengine', 'speaker': request['tts_speaker'], 'speed': request['tts_speed'], **speech_stats}
+            result['narration'] = {'provider': 'volcengine', 'speaker': request['tts_speaker'], 'speed': timing_speed, **speech_stats}
         else:
             result['narration'] = {'provider': 'none', 'fallback': bool(fallback)}
         store.update(job_id, 'ready', '草稿与近似预览可下载', 100, result=result)

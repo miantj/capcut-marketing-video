@@ -23,6 +23,8 @@ class CaptionStyleTests(unittest.TestCase):
         self.assertEqual(''.join(c['text'] for c in cues),source)
         self.assertTrue(all('\n' not in c['text'] for c in caps))
         self.assertTrue(all(c['animation']['intro_seconds'] == .5 and c['animation']['outro_seconds'] == .5 for c in caps))
+        fast = caption_plan(cues, font, 1080, 1920, speed=2.0)
+        self.assertTrue(all(c['animation']['intro_seconds'] == .25 and c['animation']['outro_seconds'] == .25 for c in fast))
         self.assertEqual(caps[0]['text'],'服装圈混5年才知道的潜规则')
         self.assertEqual(caps[0]['visual']['fontSize'], 20)
         self.assertEqual(caps[0]['visual']['y'], -.46)

@@ -158,6 +158,67 @@ def script_cues(text, *, limit_estimate=True, merge_short=True):
     return cues
 
 
+def media_fit_speed(estimated_duration, material_seconds, *, base_speed=1.0, max_speed=2.0):
+    """Pick a speech/subtitle speed that prefers fitting media before looping clips.
+
+    Estimates are treated as 1.0× timing. Returns (speed, auto_bumped).
+    """
+    base = min(max_speed, max(0.5, float(base_speed)))
+    if not math.isfinite(estimated_duration) or estimated_duration <= 0:
+        return base, False
+    if not math.isfinite(material_seconds) or material_seconds <= 0:
+        return base, False
+    if estimated_duration <= material_seconds + 1e-6:
+        return base, False
+    needed = estimated_duration / material_seconds
+    speed = min(max_speed, max(base, needed))
+    return round(speed, 4), speed > base + 1e-9
+
+
+def speedup_preview(script, material_seconds, *, narration='none', base_speed=1.0, max_speed=2.0):
+    """Return whether auto speed-up would run, for pre-submit confirmation."""
+    if narration == 'volcengine':
+        cues = script_cues(script, limit_estimate=False, merge_short=False)
+        base = base_speed
+    else:
+        cues = script_cues(script, limit_estimate=True, merge_short=True)
+        base = 1.0
+    estimated = round(sum(c['duration'] for c in cues), 6)
+    speed, needed = media_fit_speed(estimated, material_seconds, base_speed=base, max_speed=max_speed)
+    fitted = round(estimated / speed, 6) if speed else estimated
+    return {
+        'needed': needed,
+        'estimated_seconds': estimated,
+        'material_seconds': round(float(material_seconds), 6),
+        'base_speed': round(float(base), 4),
+        'speed': speed,
+        'anim_seconds': round(0.5 / speed, 4),
+        'fitted_seconds': fitted,
+        'still_loops': fitted > float(material_seconds) + 1e-6,
+        'message': (f'文案约 {estimated:.1f} 秒，素材约 {float(material_seconds):.1f} 秒。'
+                    f'将把语速提至 {speed:g} 倍'
+                    + ('；若仍不够会少量重复画面。' if fitted > float(material_seconds) + 1e-6 else '。')),
+    }
+
+
+def fit_cues_to_media(cues, material_seconds, *, max_speed=2.0):
+    """Speed up estimated cue timing up to max_speed before material must loop.
+
+    Caption intro/outro scale with the same speed in caption_plan, so short
+    screens stay valid without merging after the speed-up.
+    """
+    duration = sum(c['duration'] for c in cues)
+    speed, _ = media_fit_speed(duration, material_seconds, base_speed=1.0, max_speed=max_speed)
+    if speed <= 1.0 + 1e-9:
+        return list(cues), round(duration, 6), 1.0, False
+    scaled, cursor = [], 0.
+    for cue in cues:
+        take = cue['duration'] / speed
+        scaled.append({**cue, 'start': round(cursor, 6), 'duration': round(take, 6)})
+        cursor += take
+    return scaled, round(cursor, 6), speed, True
+
+
 def ordered_shots(cues, videos):
     duration = sum(c['duration'] for c in cues)
     shots, start, index = [], 0., 0

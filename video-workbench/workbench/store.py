@@ -33,6 +33,7 @@ class Store:
 
     @contextmanager
     def db(self):
+        self.data.mkdir(parents=True, exist_ok=True)
         db = sqlite3.connect(self.path, timeout=30)
         db.row_factory = sqlite3.Row
         db.execute('PRAGMA foreign_keys=ON')
@@ -105,6 +106,17 @@ class Store:
             db.execute('UPDATE jobs SET status=?,stage=?,progress=?,updated=?,error=?,result=? WHERE id=?',
                        (status, stage, progress, time.time(), error, json.dumps(result, ensure_ascii=False) if result else None, job_id))
             db.execute('INSERT INTO events(job,at,message) VALUES(?,?,?)', (job_id, time.time(), stage))
+
+    def patch_request(self, job_id, **changes):
+        with self.db() as db:
+            row = db.execute('SELECT request FROM jobs WHERE id=?', (job_id,)).fetchone()
+            if not row:
+                return None
+            request = json.loads(row[0])
+            request.update(changes)
+            db.execute('UPDATE jobs SET request=?,updated=? WHERE id=?',
+                       (json.dumps(request, ensure_ascii=False), time.time(), job_id))
+            return request
 
     def claim(self):
         with self.db() as db:
